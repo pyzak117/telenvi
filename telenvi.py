@@ -21,8 +21,8 @@ class Imsat:
     """
     description
     -----------
-    Represent a satellite image. 
-    Each band automatically convert in numpy.ndArray.
+    Represent a satellite image
+    Each band is automatically convert in numpy.ndarray
 
     attributes
     ----------
@@ -50,7 +50,7 @@ class Imsat:
             if len(cropZone) != 2:
                 raise ValueError("unable to find cropZone - invalid coordinates")
 
-            # Unpack Region Of Interest coordinates
+            # Unpack crop coordinates
             xMin, yMax = cropZone[0]
             xMax, yMin = cropZone[1]
 
@@ -58,7 +58,7 @@ class Imsat:
             if xMin >= xMax or yMin >= yMax :
                 raise ValueError("Coordonnées de la zone d'intérêt invalides")
 
-            # mode crop activate
+            # crop mode activated
             CROP = True
 
         print("Bands research and loading")
@@ -98,7 +98,7 @@ class Imsat:
                     row2=int((yMin-orY)/heightPix)
                     col2=int((xMax-orX)/widthPix)
 
-                    # numpy ndArray conversion
+                    # ndarray conversion
                     band = ds.ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
 
                 else:
