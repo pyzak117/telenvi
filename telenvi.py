@@ -42,10 +42,6 @@ class Imsat:
 
     def __init__(self, imgPath, cropZone = None, product = "LS8"):
 
-        # Je veux rajouter la prise en charge des images sentinel
-
-        # Adapter comportement fonction init selon le paramètre capteur
-
         # Subregion to crop
         CROP = False
 
