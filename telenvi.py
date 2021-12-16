@@ -155,3 +155,38 @@ def writeGeotiff(band, rows, cols, geoTransform, projection,outPath,driverName =
     outData.GetRasterBand(1).SetNoDataValue(10000)
     outData.FlushCache()
     return None
+  
+def NormaRaster(PathRepPrin, ProjVoulu, Res, FormatFile, algo,OptFormat=False):
+
+    try:
+
+        o = [os.path.join(PathRepPrin,e) for e in os.listdir(PathRepPrin) if e[-4:] == '.tif']
+        optionPRJ = gdal.WarpOptions(dstSRS=ProjVoulu)
+        for e in o:
+            ds = gdal.Open(e)
+            ds_reproj = gdal.Warp(e[:-4]+"_Reproj.tif", ds, options=optionPRJ)
+
+
+        p = [os.path.join(PathRepPrin, e) for e in os.listdir(PathRepPrin) if e[-len('_Reproj.tif'):] == '_Reproj.tif']
+        print(p[0][:-4])
+        optionRes = gdal.WarpOptions(xRes=Res, yRes=Res, resampleAlg=algo)
+        for e in p:
+            ds = gdal.Open(e)
+            ds_resample = gdal.Warp(e[:-4] + "_Resample.tif", ds, options=optionRes)
+
+        if OptFormat == True:
+            path = [os.path.join(PathRepPrin, i) for i in os.listdir(PathRepPrin) if i[-len('_Resample.tif'):] == '_Resample.tif']
+            for e in path:
+               Image.open(e).save('{}.{}'.format(e[:-4], str(FormatFile.lower())), format=FormatFile)
+
+        else:
+            pass
+
+    except ValueError:
+        print("CHEH")
+        pass
+    except NotADirectoryError:
+        print("Le chemin d'accès vers l'image n'est pas conforme, \n par exemple sous Linux : '/home/user/Bureau/répertoire_avec_série_d'image'")
+        pass
+    except KeyError:
+        print('Erreur dans les paramétres de la fonction')
