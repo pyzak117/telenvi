@@ -204,7 +204,8 @@ def VtoR (PathShp, Output, Newkey, TypeImg = 'GTiff', CRS = 2154, Resolution = 0
     """
     try:
         # Chargement de l'objet vecteur
-        InputShp = ogr.Open(PathShp).GetLayer()
+        Input_Shp = ogr.Open(PathShp)
+        InputShp = Input_Shp.GetLayer()
         # Chargement de la resolution voulu, par défaut 50cm
         pixel_size = Resolution
         # Obtenir l'emprise spatiale de la couche vecteur
