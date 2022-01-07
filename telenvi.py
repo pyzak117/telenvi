@@ -190,3 +190,45 @@ def NormaRaster(PathRepPrin, ProjVoulu, Res, FormatFile, algo,OptFormat=False):
         pass
     except KeyError:
         print('Erreur dans les paramétres de la fonction')
+        
+        
+def VtoR (PathShp, Output, Newkey, TypeImg = 'GTiff', CRS = 2154, Resolution = 0.5):
+    """
+    :param PathShp: Chemin d'accès absolue du fichier vecteur à convertir en raster (type = str)
+    :param Output: Chemin d'accès d'enregistrement du fichier raster (type = str)
+    :param Newkey: Nom du fichier qui doit créer (type = str)
+    :param TypeImg: Format d'image en sorti, sert à choisir le driver pour construire le raster (type = str)
+    :param CRS: Le système de projection voulu (type = int)
+    :param Resolution: La résolution spatiale attendue du raster en sorti (type = float) 
+    :return: 
+    """
+    try:
+        # Chargement de l'objet vecteur
+        InputShp = ogr.Open(PathShp).GetLayer()
+        # Chargement de la resolution voulu, par défaut 50cm
+        pixel_size = Resolution
+        # Obtenir l'emprise spatiale de la couche vecteur
+        x_min, x_max, y_min, y_max = InputShp.GetExtent()
+        # Calcule de la dimension du raster
+        x_res = int((x_max - x_min) / pixel_size)
+        y_res = int((y_max - y_min) / pixel_size)
+        # Chargement du driver pour créer le fichier raster
+        driver = gdal.GetDriverByName(TypeImg)
+        # Création du Raster, et paramétrage des attributs du raster
+        new_raster = driver.Create(Output+Newkey, x_res, y_res, 1, gdal.GDT_Byte)
+        new_raster.SetGeoTransform((x_min, pixel_size, 0, y_min, 0, pixel_size))
+        band = new_raster.GetRasterBand(1)
+        # Gestion des Nodatas 
+        no_data_value = -9999
+        band.SetNoDataValue(no_data_value)
+        band.FlushCache()
+        # On 'remplit' le raster vide créer précédémment avec les données shp, qui cooresponde à une emprise spatiale
+        gdal.RasterizeLayer(new_raster, [1], InputShp, burn_values=[255])
+        # Gestion du système de projection du raster
+        new_rasterSRS = osr.SpatialReference()
+        new_rasterSRS.ImportFromEPSG(CRS)
+        new_raster.SetProjection(new_rasterSRS.ExportToWkt())
+        
+    except ValueError:
+        print('CHEH')
+        sys.exit(1)
