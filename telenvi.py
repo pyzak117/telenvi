@@ -14,7 +14,7 @@ import sys
 
 # Third-Party librairies
 import numpy as np
-from osgeo import gdal
+from osgeo import gdal, ogr, osr
 from osgeo.gdalconst import *
 
 def load_bands(fPath, 
