@@ -174,7 +174,7 @@ def NormaRaster(PathRepPrin, ProjVoulu, Res, FormatFile, algo,OptFormat=False):
             ds = gdal.Open(e)
             ds_resample = gdal.Warp(e[:-4] + "_Resample.tif", ds, options=optionRes)
 
-        if OptFormat == True:
+        if OptFormat is True:
             path = [os.path.join(PathRepPrin, i) for i in os.listdir(PathRepPrin) if i[-len('_Resample.tif'):] == '_Resample.tif']
             for e in path:
                Image.open(e).save('{}.{}'.format(e[:-4], str(FormatFile.lower())), format=FormatFile)
