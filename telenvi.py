@@ -22,11 +22,30 @@ import geopandas as gpd
 def load_bands(fPath, 
                reflectance = False,
                pattern = None,
-               endKeyPos = 1000,
+               endKeyPos = -4,
                cropZone = None,
                featurePos = None,
                verbose = False):
 
+  """
+  :descr:
+    Initially made to transform all the bands of a satellite image, contained in differents files in the same folder in numpy.array object.
+  
+  :param:
+    fPath (str) = name of the folder where the images files are stored
+    pattern (str) = a regular expression pattern corresponding to all the files you want to load. If a string match, it will be the key to find the file in the dictionnary returned.
+    endKeyPos (int) = help you to build keys easy to understand. By default -4, just to exclude the extension of the file.
+    cropZone (list) or (str) = a list of coordinates to crop the file or a path to a shapefile which contain a square to crop. The coordinates or the shapefile must be in the same SCR than the image file.
+    featurePos (int) = the position of the feature of interest in the shapefile. (If there is only one feature, featurePos must be 0).
+    verbose (boolean) = if it's True, the function give informations during is execution. It's interesting to debugging.
+
+  :returns:
+    bands (dictionnary) = contain all the file corresponding to the pattern, organised with the str combinaison which match the pattern.
+    geoTransform (list) = contain the top left corner and bottom right corner coordinates, the pixel width and the pixel height of the first file loaded
+    projection (proj) = SCR of the file
+    
+  """
+  
     # 1. Inputs checking
     ####################
 
