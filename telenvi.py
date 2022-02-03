@@ -3,7 +3,9 @@
 
 """
 telenvi module
---------------
+---------------
+Version = 1.4
+Fev. 2022
 """
 
 VERSION = 1.5
@@ -20,7 +22,7 @@ from osgeo import gdal
 from osgeo import gdalconst
 import geopandas as gpd
 
-def load_bands(targetPath, 
+def getGeoRasterData(target, 
                pattern = None,
                endKeyPos = -4,
                cropZone = None,
@@ -38,10 +40,10 @@ def load_bands(targetPath,
     
     :param:
         # Mandatory
-        targetPath (str) = the file to open, or the directory containing one or many files to open
+        target (str) = the file to open, or the directory containing one or many files to open
 
         # Optionnal
-        pattern (str) = a regular expression pattern corresponding to all the files you want to load contained in the targetPath. If a string match, it will be the key to find the file in the dictionnary returned.
+        pattern (str) = a regular expression pattern corresponding to all the files you want to load contained in the target. If a string match, it will be the key to find the file in the dictionnary returned.
         endKeyPos (int) = help you to build keys easy to understand. By default -4, just to exclude the extension of the file.
 
         indexToLoad (int or list) = indexes of the bands you want load - Default : all the bands are load
@@ -64,12 +66,12 @@ def load_bands(targetPath,
     # 1. Inputs checking
     ####################
 
-    # check targetPath validity
-    if not os.path.exists(targetPath):
-        raise ValueError("error 1 : unvalid targetPath")
+    # check target validity
+    if not os.path.exists(target):
+        raise ValueError("error 1 : unvalid target")
 
-    # check targetPath reference (file or directory)
-    if os.path.isdir(targetPath):
+    # check target reference (file or directory)
+    if os.path.isdir(target):
         if pattern == None:
             raise ValueError("error 2 : undefined pattern")
 
@@ -85,7 +87,7 @@ def load_bands(targetPath,
         # DIR mode activation
         MODE = "DIR"
 
-    if os.path.isfile(targetPath):
+    if os.path.isfile(target):
         MODE = "FILE"
 
     # Check the bands extraction mode
@@ -193,11 +195,11 @@ def load_bands(targetPath,
             # get array(s) from the dataset
             if BANDSMODE == 0:
                 stack = inDs.ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
-                return stack, geoTransform, projection
+                return stack, nGeoTransform, projection
 
             elif BANDSMODE == 1:
                 target_array = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
-                return target_array, geoTransform, projection
+                return target_array, nGeoTransform, projection
 
             elif BANDSMODE == 2:
                 # Extraction de la premiere bande
@@ -240,14 +242,14 @@ def load_bands(targetPath,
     if MODE == "DIR":
         data = {}
 
-        for fileName in os.listdir(targetPath):
+        for fileName in os.listdir(target):
             try : # Get pattern start position in fileName
                 startKeyPos = re.search(rpattern, fileName.upper()).span()[0]    
 
             except AttributeError: # Pattern not find in fileName
                 continue
             
-            fileBandName = os.path.join(targetPath, fileName)
+            fileBandName = os.path.join(target, fileName)
             
             # Get the key corresponding to the pattern in the fileName
             bandId = fileName[startKeyPos:endKeyPos]
@@ -262,17 +264,17 @@ def load_bands(targetPath,
                 print(fileName + " loaded with key " + bandId)
 
     elif MODE == "FILE":
-        data = extractDataFromGdalDs(targetPath)
+        data = extractDataFromGdalDs(target)
 
         # Informations to the user
         if CROP:
-            print(os.path.basename(targetPath) + " loaded on cropZone")
+            print(os.path.basename(target) + " loaded on cropZone")
         else:
-            print(os.path.basename(targetPath) + " loaded")
+            print(os.path.basename(target) + " loaded")
 
     return data
 
-def arrayToRaster(array,
+def createGeoRasterFile(array,
                   geoTransform,
                   projection,
                   outPath,
@@ -309,7 +311,7 @@ def arrayToRaster(array,
         nb_bands = 1
         rows, cols = array.shape
     
-    if ar_dimensions == 3:
+    elif ar_dimensions == 3:
         nb_bands, rows, cols = array.shape
     
     else:
@@ -322,16 +324,20 @@ def arrayToRaster(array,
     outDs.SetGeoTransform(geoTransform)
     outDs.SetProjection(projection)
 
-    # Store array(s) in band(s)
-    for target_array in range(1, nb_bands):
-        outDs.GetRasterBand(target_array).WriteArray(array[target_array-1])
-        outDs.GetRasterBand(target_array).SetNoDataValue(10000)
-    
+    if ar_dimensions == 3:
+        # Store array(s) in band(s)
+        for target_array in range(1, nb_bands):
+            outDs.GetRasterBand(target_array).WriteArray(array[target_array-1])
+            outDs.GetRasterBand(target_array).SetNoDataValue(10000)
+
+    else:
+        outDs.GetRasterBand(1).WriteArray(array)
+
     # Hide nodata values
     outDs.FlushCache()
 
     # Informations to the user
-    print("\n" + os.path.basename(outPath) + "OK")
+    print("\n" + os.path.basename(outPath) + " OK")
 
     return None
 
