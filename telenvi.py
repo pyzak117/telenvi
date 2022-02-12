@@ -4,7 +4,7 @@
 """
 telenvi module
 ---------------
-Version = 1.4
+Version = 1.5
 Fev. 2022
 """
 
@@ -30,6 +30,7 @@ def getGeoRasterData(target,
                featurePos = None,
                new_proj = None,
                new_res = None,
+               rs_method = "near"
                ):
 
     """
@@ -52,7 +53,9 @@ def getGeoRasterData(target,
         featurePos (int) = the position of the polygone in the attribute table of shapefile.
 
         new_proj (str) = String describing the target Coordinates System Reference
+        
         new_res (float) = The new pixel size. If SCR have to be modified to, resolution must be in target SCR unit (degrees or metres)
+        rs_method (str) = The resample algorithm. By default, near for nearest neighboor. Must be choose among {near, bilinear, cubic, cubicspline, lanczos, average, mode, max,  min,  med, q1, q3, sum}
         
         verbose (int) = talkative-level of the function: if it's 0, only primary information will be print during the bands loading. If it's 2, many information.
 
@@ -118,11 +121,11 @@ def getGeoRasterData(target,
                 raise ValueError("error 7 : cropZone tuples must have 2 numbers")
 
             # Unpack crop coordinates
-            xMin, yMax = cropZone[0]
-            xMax, yMin = cropZone[1]
+            XMIN, YMAX = cropZone[0]
+            XMAX, YMIN = cropZone[1]
 
             # Check coordinates logic validity
-            if xMin >= xMax or yMin >= yMax :
+            if XMIN >= XMAX or YMIN >= YMAX :
                 raise ValueError("error 8 : Coordinates are invalid")
 
             # Crop mode activate
@@ -137,8 +140,8 @@ def getGeoRasterData(target,
 
             # Feature geometry extraction
             geom = layer["geometry"][featurePos].bounds
-            xMin, yMax = geom[0], geom[3]
-            xMax, yMin = geom[2], geom[1]
+            XMIN, YMAX = geom[0], geom[3]
+            XMAX, YMIN = geom[2], geom[1]
             
             # Crop mode activate
             CROP = True
@@ -167,84 +170,68 @@ def getGeoRasterData(target,
             inDs = gdal.Warp("", inDs, format = "VRT", dstSRS = new_proj)
 
         if RESAMPLE:
-            inDs = gdal.Warp("", inDs, format = "VRT", xRes = new_res, yRes = new_res)
+            inDs = gdal.Warp("", inDs, format = "VRT", xRes = new_res, yRes = new_res, resampleAlg=rs_method)
 
         # Get geographic data from the dataset
         geoTransform = inDs.GetGeoTransform() # Describe geographic area of the full image
         projection = inDs.GetProjection() # The big Str which describe the Coordinates Reference System
 
+        # Unpack geoTransform of the full image
+        orX = geoTransform[0]
+        orY = geoTransform[3]
+        widthPix = geoTransform[1]
+        heightPix = geoTransform[5]
+
         if CROP:
+            # Transform geographic coordinates of the zone of interest into pixels coordinates
+            row1 = int((YMAX-orY)/heightPix)
+            col1 = int((XMIN-orX)/widthPix)
+            row2 = int((YMIN-orY)/heightPix)
+            col2 = int((XMAX-orX)/widthPix)
 
-            # Unpack geoTransform of the full image
-            orX = geoTransform[0]
-            orY = geoTransform[3]
-            widthPix = geoTransform[1]
-            heightPix = geoTransform[5]
+            # Get the coordinates of entire pixels around the area limits
+            crop_orX = orX + (col1 * widthPix)
+            crop_orY = orY + (row1 * heightPix)
 
-            # Transform geographic coordinates of the interest-part into pixels coordinates
-            row1 = int((yMax-orY)/heightPix)
-            col1 = int((xMin-orX)/widthPix)
-            row2 = int((yMin-orY)/heightPix)
-            col2 = int((xMax-orX)/widthPix)
-
-            # Build a new geoTransform which describe the interest-part of the image
-            crop_orX = xMin
-            crop_orY = yMax
-            nGeoTransform = (crop_orX, widthPix, 0.0, crop_orY, 0.0, heightPix)
-
-            # get array(s) from the dataset
-            if BANDSMODE == 0:
-                stack = inDs.ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
-                return stack, nGeoTransform, projection
-
-            elif BANDSMODE == 1:
-                target_array = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
-                return target_array, nGeoTransform, projection
-
-            elif BANDSMODE == 2:
-                # Extraction de la premiere bande
-                first_array = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
-
-                # Creation d'un stack et ajout de la premiere bande
-                target_array = np.array([first_array])
-
-                # Ajout de toutes les autres bandes au stack
-                for index in indexToLoad[1:]:
-                    new_array = inDs.GetRasterBand(index).ReadAsArray(col1,row1,col2-col1+1,row2-row1+1).astype(np.float32)
-                    target_array = np.append(target_array, [new_array], axis=0)
-
-            return target_array, nGeoTransform, projection
+            # Update the geotransform
+            geoTransform = (crop_orX, widthPix, 0.0, crop_orY, 0.0, heightPix)
 
         else:
-            # get array(s) from the dataset
-            if BANDSMODE == 0:
-                stack = inDs.ReadAsArray().astype(np.float32)
-                return stack, geoTransform, projection
+            row1 = 0
+            col1 = 0
+            row2 = inDs.RasterYSize - 1
+            col2 = inDs.RasterXSize - 1
 
-            elif BANDSMODE == 1:
-                target_array = inDs.GetRasterBand(indexToLoad).ReadAsArray().astype(np.float32)
-                return target_array, geoTransform, projection
+        # get array(s) from the dataset
+        if BANDSMODE == 0:
+            stack = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
+            return stack, geoTransform, projection
 
-            elif BANDSMODE == 2:
-                # Extraction de la premiere bande
-                first_array = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray().astype(np.float32)
-
-                # Creation d'un stack et ajout de la premiere bande
-                target_array = np.array([first_array])
-
-                # Ajout de toutes les autres bandes au stack
-                for index in indexToLoad[1:]:
-                    new_array = inDs.GetRasterBand(index).ReadAsArray().astype(np.float32)
-                    target_array = np.append(target_array, [new_array], axis=0)
-
+        elif BANDSMODE == 1:
+            target_array = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
             return target_array, geoTransform, projection
+
+        elif BANDSMODE == 2:
+            # Extract the first band
+            first_array = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
+
+            # Create a 3D array and store the first band in it
+            target_array = np.array([first_array])
+
+            # Add all the others bands in the stack
+            for index in indexToLoad[1:]:
+                new_array = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
+                target_array = np.append(target_array, [new_array], axis=0)
+
+        return target_array, geoTransform, projection
 
     if MODE == "DIR":
         data = {}
 
         for fileName in os.listdir(target):
+
             try : # Get pattern start position in fileName
-                startKeyPos = re.search(rpattern, fileName.upper()).span()[0]    
+                startKeyPos = re.search(rpattern, fileName.upper()).span()[0]
 
             except AttributeError: # Pattern not find in fileName
                 continue
