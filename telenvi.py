@@ -23,19 +23,66 @@ from matplotlib import pyplot as plt
 
 class GeoIm:
 
-    def __init__(self, array, pxlW, pxlH, orX, orY, crs):
-        self.pxlV = array
-        self.pxlW = pxlW
-        self.pxlH = pxlH
-        self.orX = orX
-        self.orY = orY
+    """
+    Describe a georeferenced raster.
+    
+    attributes
+    ----------
+        pxlV (np.ndarray) : an array representing the pixels values
+        geoData (tuple) : a tuple like
+            (
+                pixel_width, 
+                pixel_height,
+                originX,
+                originY
+            )
+        crs : a big string representing the coordinates reference system
+    """
+
+    def __init__(self, pxlV, geoData, crs):
+        self.pxlV = pxlV
+        self.geoData = geoData
         self.crs = crs
+
+    def __add__(self, neighboor):
+        res = self.pxlV + neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+    
+    def __sub__(self, neighboor):
+        res = self.pxlV - neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+
+    def __mul__(self, neighboor):
+        res = self.pxlV * neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+
+    def __truediv__(self, neighboor):
+        res = self.pxlV / neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+
+    def __repr__(self):
+        self.quickVisual()
+        return ""
 
     def exportAsRaster(
         self,
         outP,
         format = gdalconst.GDT_Float32,
         driverName = "GTiff"):
+
+        """
+        Export a GeoIm object into a raster file georeferenced.
+
+        :param:
+        -------
+            outP (str) : the path where you want to save the raster
+            format (gdalconst) : the image format
+            driverName (str) : the extension of the raster file
+        """
 
         driver = gdal.GetDriverByName(driverName)
 
@@ -54,13 +101,12 @@ class GeoIm:
 
         # gdal.Dataset creation
         outDs = driver.Create(outP, cols, rows, nb_bands, format)
-        outDs.SetGeoTransform((self.orX, self.pxlW, 0.0, self.orY, 0.0, self.pxlH))
+        outDs.SetGeoTransform((self.geoData[2], self.geoData[0], 0.0, self.geoData[3], 0.0, self.geoData[1]))
         outDs.SetProjection(self.crs)
 
         # Export each band of the 3D array
         if dim == 3:
             for band in range(1, nb_bands+1):
-                print(self.pxlV[band-1])
                 outDs.GetRasterBand(band).WriteArray(self.pxlV[band-1])
                 outDs.GetRasterBand(band).SetNoDataValue(10000)
 
@@ -72,51 +118,55 @@ class GeoIm:
         print("\n" + os.path.basename(outP) + " OK")
         return None
 
-    def quickVisual(self, bande = 0, colors = "viridis"):
+    def quickVisual(self, band = 0, colors = "viridis"):
+        """
+        Show the pixels values of a GeoIm object.
+
+        :param:
+        -------
+            band (int) : if the array of pixels values represent a multispectral image, with 3 dimensions, you can choose the band than you want to show here.
+            colors (str) : a string describing the color-range you want to use to show the image
+        """
 
         if len(self.pxlV.shape) == 2:
             plt.imshow(self.pxlV, cmap = colors)
 
         elif len(self.pxlV.shape) == 3:
-            plt.imshow(self.pxlV[bande], cmap = colors)
+            plt.imshow(self.pxlV[band], cmap = colors)
 
         plt.show()
         plt.close()
-        return ""
-
-    def __add__(self, neighboor):
-        res = self.pxlV + neighboor.pxlV
-        x = GeoIm(res, self.pxlW, self.pxlH, self.orX, self.orY, self.crs)
-        return x
-    
-    def __sub__(self, neighboor):
-        res = self.pxlV - neighboor.pxlV
-        x = GeoIm(res, self.pxlW, self.pxlH, self.orX, self.orY, self.crs)
-        return x
-
-    def __mul__(self, neighboor):
-        res = self.pxlV * neighboor.pxlV
-        x = GeoIm(res, self.pxlW, self.pxlH, self.orX, self.orY, self.crs)
-        return x
-
-    def __truediv__(self, neighboor):
-        res = self.pxlV / neighboor.pxlV
-        x = GeoIm(res, self.pxlW, self.pxlH, self.orX, self.orY, self.crs)
-        return x
-
-    def __repr__(self):
-        self.quickVisual()
-        return ""
+        return None
 
 def openGeoRaster(
     targetP,
-    format = np.float32,
     indexToLoad = None,
     roi = None,
     ft = 0,
     crs = None,
     res = None,
-    algo = "near"):
+    algo = "near",
+    format = np.float32,
+    ):
+
+    """
+    Make a GeoIm object from a georeferenced raster file.
+
+    :param:
+    -------
+        targetP (str) : the path to the raster you want to load
+        indexToLoad (int or list) : if the file is a stack, give the band or the bands you want to load here
+        roi (str or list) : a list of 2 tuples [(x,y),(x,y)] representing the top-left corner and bottom-right corner of a region of interest or a path to a shapefile containing squared polygone(s)
+        ft (int) : if roi is a path to a shapefile, ft give the index in the attribute table of the feature you want to use as ROI
+        crs (str) : if you want to reproject the image, this parameter is a string describing the coordinates reference system of the image
+        res (int or float) : if you want to resample the image, you give the new resolution here. The unit of the value must be in the unit of the target crs.
+        algo (str) : the resample algorithm you want to use
+        format (np.dtype) : the numeric format of the pixels values
+    
+    :return:
+    --------
+        a GeoIm object
+    """
 
     """
     -------------------
@@ -124,9 +174,9 @@ def openGeoRaster(
     -------------------
     """
     
-    # check neighboor validity
+    # check target validity
     if not os.path.exists(targetP):
-        raise ValueError("error 1 : invalid neighboor path")
+        raise ValueError("error 1 : invalid target path")
     
     # Check format validity
     # ...
@@ -141,11 +191,11 @@ def openGeoRaster(
         elif type(indexToLoad) == list:
             for element in indexToLoad:
                 if type(element) != int:
-                    raise ValueError("error 2 : neighboor_array index must be integer or list of integers")
+                    raise ValueError("error 2 : target_array index must be integer or list of integers")
             BANDSMODE = 2
         
         else:
-            raise ValueError("error 2 : neighboor_array index must be integer or list of integers")
+            raise ValueError("error 2 : target_array index must be integer or list of integers")
 
     # Check CROP mode
     CROP = False
@@ -254,19 +304,53 @@ def openGeoRaster(
             band = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
             pxlV = np.append(pxlV, [band], axis=0)
 
-    return GeoIm(pxlV, widthPix, heightPix, orX, orY, projection)
+    return GeoIm(pxlV, (widthPix, heightPix, orX, orY), projection)
 
 def openManyGeoRasters(
     folder,
     pattern,
     endKeyPos = -4,
-    format = np.float32,
     indexToLoad = None,
     roi = None,
     ft = 0,
     crs = None,
     res = None,
-    algo = "near"):
+    algo = "near",
+    format = np.float32):
+
+    """
+    Make a dictionnary containing GeoIm objects for all the raster files in the folder, with a part of their name matching with the pattern. You can build the keys of the dictionnary by setting the pattern and the endKeyPos.
+
+    :param:
+    -------
+        folder (str) : path to a directory containing many rasters
+        pattern (str) : a regular expression pattern use to detect rasters files you want to load
+        endKeyPos (int) : the position in the raster file name where you want to stop the key
+
+    :return:
+    --------
+        x (dictionnary) : a dictionnary with GeoIm objects inside
+
+    :example:
+    ---------
+        image_sentinel_20190118
+            |__ T32PMV_20190118T095331_B01.jp2
+            |__ T32PMV_20190118T095331_B01.jp2.xml
+            |__ T32PMV_20190118T095331_B02.jp2
+            |__ T32PMV_20190118T095331_B02.jp2.xml
+            |__ T32PMV_20190118T095331_B03.jp2
+            |__ T32PMV_20190118T095331_B04.jp2
+
+        params :
+        folder = image_sentinel_20190118
+        pattern = "B[0-9]+.jp2$" >>> It means "a 'B' followed by a serie of numbers ('[0-9]+'), then by a point, then by 'jp2', then it's the end of the filename '$'. use this pattern allow the programm to avoid the metadata files, which ended with .xml
+        endKeyPos = -4
+
+        return:
+            {"B02":GeoIm object with the data of T32PMV_20190118T095331_B02.jp2,
+             "B03":GeoIm object with the data of T32PMV_20190118T095331_B03.jp2,
+             "B04":GeoIm object with the data of T32PMV_20190118T095331_B04.jp2}
+    """
 
     if pattern == None:
         raise ValueError("error 2 : undefined pattern")
@@ -293,33 +377,43 @@ def openManyGeoRasters(
         
         # Get the key corresponding to the pattern in the fileName
         bandId = fileName[startKeyPos:endKeyPos]
-        print(bandId)
 
         # Extract and pack all the data in a lovely dictionnary with bandId as key
         x[bandId] = openGeoRaster(
             fileBandName,
-            format,
             indexToLoad,
             roi,
             ft,
             crs,
             res,
-            algo)
+            algo,
+            format)
+        
+        print(bandId + " loaded")
 
     return x
 
 def stackGeoIm(list_GeoIm):
+    """
+    Make a stack from many GeoIm objects
+
+    :params:
+    --------
+        list_GeoIm (list) : a list containing 2 or more GeoIm objects. They must have the same geoData and the same CRS.
+    
+    :returns:
+    ---------
+        a new GeoIm object with pxlV in 3 dimensions. The number of the bands is the same than the order of the GeoIm in list_GeoIm.
+    """
     
     # Inputs Checking
     try :
-        standard_res = list_GeoIm[0].pxlW
-        standard_crs = list_GeoIm[0].crs
-        standard_orX = list_GeoIm[0].orX
-        standard_orY = list_GeoIm[0].orY
+        std_geoData = list_GeoIm[0].geoData
+        std_crs = list_GeoIm[0].crs
 
         for elt in list_GeoIm:
-            if standard_res != elt.pxlW or standard_crs != elt.crs or standard_orX != elt.orX or standard_orY != elt.orY:
-                raise ValueError("Al lthe GeoIm objects must have the same resolution, the same CRS and the same origin")
+            if std_geoData != elt.geoData or std_crs != elt.crs:
+                raise ValueError("All the GeoIm objects must have the same resolution, the same origin x and y and the same CRS")
     
     except AttributeError:
         print("error 13: stackGeoIm take a list of GeoIm objects")
@@ -331,4 +425,4 @@ def stackGeoIm(list_GeoIm):
         stack = np.append(stack, [elt.pxlV], axis=0)
 
     # Return    
-    return GeoIm(stack, standard_res, standard_res, standard_orX, standard_orY, standard_crs)
+    return GeoIm(stack, std_geoData, std_crs)
