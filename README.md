@@ -20,8 +20,8 @@ Use from a python script
 ----------
 You can download a tutorial to learn how to use the telenvi package here : https://mega.nz/file/voNTUYrR#WHtp_stDGi-p3_TfUj9K_K76H56n0B1L0hGixMvVzkY You will find a .rar archive containing jupyter notebooks and data to test the package.
 
-The useful functions are stored into telenvi_tools module. You can access by typing this into a script: from telenvi import telenvi_tools
+The useful functions are stored into telenvi_tools module. You can access by typing this into a script: from telenvi import raster_tools
 
 contact
 -------
-You can contact me at thibautduvanel2@hotmail.fr if you have any questions.
+You can contact me at thibaut.duvanel@univ-savoie.fr if you have any questions.
