@@ -1,24 +1,11 @@
-#%%
-"""
-telenvi module
----------------
-Version = 2.0
-Fev. 2022
-"""
-
-VERSION = 2.0
-
-print("\n---------\nTELENVI MODULE " + str(VERSION) + "\n---------\n")
-
 # Standard librairies
 import os
 import re
 
 # Third-Party librairies
 import numpy as np
-from osgeo import gdal
-from osgeo import gdalconst
 import geopandas as gpd
+from osgeo import gdal, gdalconst, ogr
 from matplotlib import pyplot as plt
 
 class GeoIm:
@@ -68,7 +55,53 @@ class GeoIm:
         self.quickVisual()
         return ""
 
-    def exportAsRaster(
+    def getCoordsExtent(self):
+        """
+        :return:
+        --------
+            bounding-box coordinates of the GeoIm's spatial extent
+        """
+
+        dim = len(self.pxlV.shape)
+
+        # Compute extent coordinates
+        pixW, pixH, xLeft, yTop = self.geoData
+        
+        if dim == 2:
+            rows, cols = self.pxlV.shape
+
+        elif dim == 3:
+            _, rows, cols = self.pxlV.shape
+        xRight = xLeft+cols*pixW
+        yBottom = yTop+rows*pixH
+
+        return (xLeft, yTop, xRight, yBottom)
+
+    def getGeomExtent(self):
+        """
+        :return:
+        --------
+            a ogr.Geometry object which represent the spatial extent of the GeoIm
+        """
+
+        # Get bounding box coordinates
+        xLeft, yTop, xRight, yBottom = self.getCoordsExtent()
+
+        # Create a ring
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        ring.AddPoint(xLeft, yTop)
+        ring.AddPoint(xLeft, yBottom)
+        ring.AddPoint(xRight, yBottom)
+        ring.AddPoint(xRight, yTop)
+        ring.AddPoint(xLeft, yTop)
+
+        # Assign this ring to a polygon
+        polygon_env = ogr.Geometry(ogr.wkbPolygon)
+        polygon_env.AddGeometry(ring)
+
+        return polygon_env
+
+    def exportAsRasterFile(
         self,
         outP,
         format = gdalconst.GDT_Float32,
@@ -108,7 +141,6 @@ class GeoIm:
         if dim == 3:
             for band in range(1, nb_bands+1):
                 outDs.GetRasterBand(band).WriteArray(self.pxlV[band-1])
-                outDs.GetRasterBand(band).SetNoDataValue(10000)
 
         # Export the unique band
         else:
@@ -146,7 +178,7 @@ def openGeoRaster(
     crs = None,
     res = None,
     algo = "near",
-    format = np.float32,
+    numFormat = np.float32,
     ):
 
     """
@@ -168,11 +200,9 @@ def openGeoRaster(
         a GeoIm object
     """
 
-    """
-    -------------------
-    # Inputs checking #
-    -------------------
-    """
+    # -------------------
+    # # Inputs checking #
+    # -------------------
     
     # check target validity
     if not os.path.exists(targetP):
@@ -251,11 +281,9 @@ def openGeoRaster(
             raise ValueError("error 8 : The resolution must be a number")
         RESAMPLE = True
     
-    """
-    ----------------
-    # Loading data #
-    ----------------
-    """
+    # ----------------
+    # # Loading data #
+    # ----------------
 
     inDs = gdal.Open(targetP)
 
@@ -292,17 +320,19 @@ def openGeoRaster(
 
     # get array(s) from the dataset
     if BANDSMODE == 0:
-        pxlV = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(format)
+        pxlV = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
 
     elif BANDSMODE == 1:
-        pxlV = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
+        pxlV = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
 
     elif BANDSMODE == 2:
-        band1 = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
+        band1 = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
         pxlV = np.array([band1])
         for index in indexToLoad[1:]:
-            band = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(np.float32)
+            band = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
             pxlV = np.append(pxlV, [band], axis=0)
+
+    print(os.path.basename(targetP + " loaded"))
 
     return GeoIm(pxlV, (widthPix, heightPix, orX, orY), projection)
 
