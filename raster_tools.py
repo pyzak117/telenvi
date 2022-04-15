@@ -7,6 +7,7 @@ import numpy as np
 import geopandas as gpd
 from osgeo import gdal, gdalconst, ogr, osr
 from matplotlib import pyplot as plt
+import json
 
 class GeoIm:
 
