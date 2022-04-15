@@ -7,10 +7,10 @@ Contain tools to work on satellites images. You can easily load georeferenced ra
 dependancies
 ------------
 to work with telenvi you need thoses libraries:
-  gdal
-  numpy
-  geopandas
-  matplotlib
+  - gdal
+  - numpy
+  - geopandas
+  - matplotlib
  
 Installation
 ------------
