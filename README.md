@@ -36,7 +36,9 @@ target = raster_tools.openGeoRaster(
 ```
 
 #### pixel-values extraction
+```
 array = target.pxlV
+```
 
 #### export a raster
 ```
