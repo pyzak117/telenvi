@@ -16,14 +16,14 @@ to work with telenvi you need thoses libraries:
 pip install telenvi
 
 # Use from a python script
-    
-`Voici un code en C :`
 
-  int main()
+```  
+int main()
   {
       printf("Hello world!\n");
       return 0;
   }
+```
 
 You can download a tutorial to learn how to use the telenvi package here :
 https://mega.nz/file/voNTUYrR#WHtp_stDGi-p3_TfUj9K_K76H56n0B1L0hGixMvVzkY
