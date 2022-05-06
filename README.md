@@ -17,7 +17,7 @@ pip install telenvi
 
 ## Use from a python script
 
-```  
+```
 from telenvi import raster_tools
 ```  
 
