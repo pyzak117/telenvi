@@ -1,4 +1,4 @@
-# Standard librairies
+#%% Standard librairies
 import os
 import re
 
@@ -188,7 +188,8 @@ def openGeoRaster(
     -------
         targetP (str) : the path to the raster you want to load
         indexToLoad (int or list) : if the file is a stack, give the band or the bands you want to load here
-        roi (str or list) : a list of 2 tuples [(x,y),(x,y)] representing the top-left corner and bottom-right corner of a region of interest or a path to a shapefile containing polygone(s)
+        roi if (list) : a list of 2 tuples [(x,y),(x,y)] representing the top-left corner and bottom-right corner of a region of interest
+            if (str) : a path to a shapefile containing polygone(s) or a path to an other raster. The GeoIm will be clip onto the extent of this raster.
         ft (int) : if roi is a path to a shapefile, ft give the index in the attribute table of the feature you want to use as ROI
         crs (int) : EPSG of a desired Coordinates Reference System (for WGS84, it's 4326 for example)
         res (int or float) : if you want to resample the image, you give the new resolution here. The unit of the value must be in the unit of the target crs.
@@ -250,20 +251,32 @@ def openGeoRaster(
             CROP = True
 
         elif type(roi) == str:
-            if ft == None:
-                raise ValueError("error 6 : ft empty")
+            match roi[-4:].lower():
+                case ".shp":
 
-            # Shapefile loading
-            layer = gpd.read_file(roi)
+                    # check ft input
+                    if ft == None:
+                        raise ValueError("error 6 : ft parameter is empty")
 
-            # Square check
-            # ...
+                    # shapefile loading
+                    layer = gpd.read_file(roi)
 
-            # Feature geometry extraction
-            geom = layer["geometry"][ft].bounds
-            XMIN, YMAX = geom[0], geom[3]
-            XMAX, YMIN = geom[2], geom[1]
-            
+                    # Feature geometry extraction
+                    geom = layer["geometry"][ft].bounds
+                    XMIN, YMAX = geom[0], geom[3]
+                    XMAX, YMIN = geom[2], geom[1]
+
+                case _:
+                    try:
+                        # get spatial extent of the raster
+                        ds = gdal.Open(roi)
+                        XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
+                        XMAX = XMIN + (xPixSize * ds.RasterXSize)
+                        YMIN = YMAX + (yPixSize * ds.RasterYSize)
+                    
+                    except AttributeError:
+                        print("error 6.2 : invalid raster region of interest")
+
             # Crop mode activate
             CROP = True
     
