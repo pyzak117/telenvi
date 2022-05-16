@@ -1,4 +1,4 @@
-# Standard librairies
+#%% Standard librairies
 import os
 import re
 
@@ -7,6 +7,117 @@ import numpy as np
 import geopandas as gpd
 from osgeo import gdal, gdalconst, ogr, osr
 from matplotlib import pyplot as plt
+import shapely.geometry
+
+class GeoGrid:
+    """
+    Describe a georeferenced data grid.
+
+    attributes
+    ----------
+        matrixian data:
+            rows
+            cols
+
+        geographic data:
+            crs
+            xLeft
+            xRight
+            yTop
+            yBottom
+            cellLengthX
+            cellLengthY
+
+    methods
+    -------
+        to_ogr(self)
+        to_shapely(self)
+
+    """
+
+    def __init__(self, xLeft, yTop, cellLengthX, cellLengthY, rows, cols, crs = None):
+
+        # Get known geographics data
+        self.crs = crs
+        self.xLeft = xLeft
+        self.yTop = yTop
+        self.cellLengthX = cellLengthX
+        self.cellLengthY = cellLengthY
+
+        # Get known matrixian data
+        self.rows = rows
+        self.cols = cols
+
+        # Compute xRight & yBottom
+        self.xRight = xLeft + cols * cellLengthX
+        self.yBottom = yTop + rows * cellLengthY
+
+    def compute_ogr_extent(self):
+        """
+        :return:
+        --------
+            a ogr.Geometry object which represent the spatial extent of the GeoGrid
+        """
+
+        # Create a ring
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        ring.AddPoint(self.xLeft, self.yTop)
+        ring.AddPoint(self.xLeft, self.yBottom)
+        ring.AddPoint(self.xRight,self.yBottom)
+        ring.AddPoint(self.xRight,self.yTop)
+        ring.AddPoint(self.xLeft, self.yTop)
+
+        # Assign this ring to a polygon
+        polygon_env = ogr.Geometry(ogr.wkbPolygon)
+        polygon_env.AddGeometry(ring)
+
+        return polygon_env
+
+    def compute_shapely_extent(self):
+        """
+        :return:
+        --------
+            a shapely geometry object which represent the spatial extent of the GeoGrid
+        """
+        extent = [
+            (self.xLeft, self.yTop),
+            (self.xLeft, self.yBottom),
+            (self.xRight, self.yBottom),
+            (self.xRight, self.yTop),
+            (self.xLeft, self.yTop)]
+
+        return shapely.geometry.Polygon(extent)
+
+    def compute_gdf_grid(self):
+        """
+        :return:
+        --------
+            a geoGridFrame where each line represent a square grid cell
+        """
+
+        cells = []
+        for row in range(self.rows):
+            print("row {}/{}".format(row, self.rows-1))
+            for col in range(self.cols):
+                cell_xLeft = self.xLeft + self.cellLengthX * col
+                cell_xRight = self.xLeft + self.cellLengthX * (col + 1)
+
+                cell_yTop = self.yTop + self.cellLengthY * row
+                cell_yBottom = self.yTop + self.cellLengthY * (row + 1)
+
+                cell_data = {}
+                cell_geom = [
+                    (cell_xLeft, cell_yTop),
+                    (cell_xLeft, cell_yBottom),
+                    (cell_xRight, cell_yBottom),
+                    (cell_xRight, cell_yTop),
+                    (cell_xLeft, cell_yTop)]
+
+                cell_data["geometry"] = shapely.geometry.Polygon(cell_geom)
+                cells.append(gpd.GeoSeries(cell_data))
+        grid = gpd.geoGridFrame(cells)
+        grid.set_crs(self.crs, inplace=True)
+        return grid
 
 class GeoIm:
 
@@ -15,91 +126,37 @@ class GeoIm:
     
     attributes
     ----------
-        pxlV (np.ndarray) : an array representing the pixels values
-        geoData (tuple) : a tuple like
-            (
-                pixel_width, 
-                pixel_height,
-                originX,
-                originY
-            )
-        crs : a big string representing the coordinates reference system
+        pxData (np.ndarray) : an array representing the pixels values
+        geoGrid (tuple) : a GeoGrid object representing the pixel-grid
     """
 
-    def __init__(self, pxlV, geoData, crs):
-        self.pxlV = pxlV
-        self.geoData = geoData
-        self.crs = crs
+    def __init__(self, pxData, geoGrid):
+        self.pxData = pxData
+        self.geoGrid = geoGrid
 
     def __add__(self, neighboor):
-        res = self.pxlV + neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
+        res = self.pxData + neighboor.pxData
+        x = GeoIm(res, self.geoGrid)
         return x
     
     def __sub__(self, neighboor):
-        res = self.pxlV - neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
+        res = self.pxData - neighboor.pxData
+        x = GeoIm(res, self.geoGrid)
         return x
 
     def __mul__(self, neighboor):
-        res = self.pxlV * neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
+        res = self.pxData * neighboor.pxData
+        x = GeoIm(res, self.geoGrid)
         return x
 
     def __truediv__(self, neighboor):
-        res = self.pxlV / neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
+        res = self.pxData / neighboor.pxData
+        x = GeoIm(res, self.geoGrid)
         return x
 
     def __repr__(self):
         self.quickVisual()
         return ""
-
-    def getCoordsExtent(self):
-        """
-        :return:
-        --------
-            bounding-box coordinates of the GeoIm's spatial extent
-        """
-
-        dim = len(self.pxlV.shape)
-
-        # Compute extent coordinates
-        pixW, pixH, xLeft, yTop = self.geoData
-        
-        if dim == 2:
-            rows, cols = self.pxlV.shape
-
-        elif dim == 3:
-            _, rows, cols = self.pxlV.shape
-        xRight = xLeft+cols*pixW
-        yBottom = yTop+rows*pixH
-
-        return (xLeft, yTop, xRight, yBottom)
-
-    def getGeomExtent(self):
-        """
-        :return:
-        --------
-            a ogr.Geometry object which represent the spatial extent of the GeoIm
-        """
-
-        # Get bounding box coordinates
-        xLeft, yTop, xRight, yBottom = self.getCoordsExtent()
-
-        # Create a ring
-        ring = ogr.Geometry(ogr.wkbLinearRing)
-        ring.AddPoint(xLeft, yTop)
-        ring.AddPoint(xLeft, yBottom)
-        ring.AddPoint(xRight, yBottom)
-        ring.AddPoint(xRight, yTop)
-        ring.AddPoint(xLeft, yTop)
-
-        # Assign this ring to a polygon
-        polygon_env = ogr.Geometry(ogr.wkbPolygon)
-        polygon_env.AddGeometry(ring)
-
-        return polygon_env
 
     def exportAsRasterFile(
         self,
@@ -120,31 +177,31 @@ class GeoIm:
         driver = gdal.GetDriverByName(driverName)
 
         # Check if the array is 2D or 3D
-        dim = len(self.pxlV.shape)
+        dim = len(self.pxData.shape)
 
         if dim == 2:
             nb_bands = 1
-            rows, cols = self.pxlV.shape
+            rows, cols = self.pxData.shape
 
         elif dim == 3:
-            nb_bands, rows, cols = self.pxlV.shape
+            nb_bands, rows, cols = self.pxData.shape
 
         else:
             raise ValueError("Array must be in 2 or 3 dimensions")
 
         # gdal.Dataset creation
         outDs = driver.Create(outP, cols, rows, nb_bands, format)
-        outDs.SetGeoTransform((self.geoData[2], self.geoData[0], 0.0, self.geoData[3], 0.0, self.geoData[1]))
-        outDs.SetProjection(self.crs)
+        outDs.SetGeoTransform((self.geoGrid.xLeft, self.geoGrid.cellLengthX, 0.0, self.geoGrid.yTop, 0.0, self.geoGrid.cellLengthY))
+        outDs.SetProjection(self.geoGrid.crs)
 
         # Export each band of the 3D array
         if dim == 3:
             for band in range(1, nb_bands+1):
-                outDs.GetRasterBand(band).WriteArray(self.pxlV[band-1])
+                outDs.GetRasterBand(band).WriteArray(self.pxData[band-1])
 
         # Export the unique band
         else:
-            outDs.GetRasterBand(1).WriteArray(self.pxlV)
+            outDs.GetRasterBand(1).WriteArray(self.pxData)
 
         outDs.FlushCache()
         print("\n" + os.path.basename(outP) + " OK")
@@ -160,11 +217,11 @@ class GeoIm:
             colors (str) : a string describing the color-range you want to use to show the image
         """
 
-        if len(self.pxlV.shape) == 2:
-            plt.imshow(self.pxlV, cmap = colors)
+        if len(self.pxData.shape) == 2:
+            plt.imshow(self.pxData, cmap = colors)
 
-        elif len(self.pxlV.shape) == 3:
-            plt.imshow(self.pxlV[band], cmap = colors)
+        elif len(self.pxData.shape) == 3:
+            plt.imshow(self.pxData[band], cmap = colors)
 
         plt.show()
         plt.close()
@@ -188,7 +245,8 @@ def openGeoRaster(
     -------
         targetP (str) : the path to the raster you want to load
         indexToLoad (int or list) : if the file is a stack, give the band or the bands you want to load here
-        roi (str or list) : a list of 2 tuples [(x,y),(x,y)] representing the top-left corner and bottom-right corner of a region of interest or a path to a shapefile containing polygone(s)
+        roi if (list) : a list of 2 tuples [(x,y),(x,y)] representing the top-left corner and bottom-right corner of a region of interest
+            if (str) : a path to a shapefile containing polygone(s) or a path to an other raster. The GeoIm will be clip onto the extent of this raster.
         ft (int) : if roi is a path to a shapefile, ft give the index in the attribute table of the feature you want to use as ROI
         crs (int) : EPSG of a desired Coordinates Reference System (for WGS84, it's 4326 for example)
         res (int or float) : if you want to resample the image, you give the new resolution here. The unit of the value must be in the unit of the target crs.
@@ -250,20 +308,31 @@ def openGeoRaster(
             CROP = True
 
         elif type(roi) == str:
-            if ft == None:
-                raise ValueError("error 6 : ft empty")
+            if roi[-4:].lower() == ".shp":
 
-            # Shapefile loading
-            layer = gpd.read_file(roi)
+                # check ft input
+                if ft == None:
+                    raise ValueError("error 6 : ft parameter is empty")
 
-            # Square check
-            # ...
+                # shapefile loading
+                layer = gpd.read_file(roi)
 
-            # Feature geometry extraction
-            geom = layer["geometry"][ft].bounds
-            XMIN, YMAX = geom[0], geom[3]
-            XMAX, YMIN = geom[2], geom[1]
-            
+                # Feature geometry extraction
+                geom = layer["geometry"][ft].bounds
+                XMIN, YMAX = geom[0], geom[3]
+                XMAX, YMIN = geom[2], geom[1]
+
+            else:
+                try:
+                    # get the common area between data_image and crop_image
+                    ds = gdal.Open(roi)
+                    XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
+                    XMAX = XMIN + (xPixSize * (ds.RasterXSize))
+                    YMIN = YMAX + (yPixSize * (ds.RasterYSize))
+                
+                except AttributeError:
+                    print("error 6.2 : invalid raster region of interest")
+
             # Crop mode activate
             CROP = True
     
@@ -323,21 +392,27 @@ def openGeoRaster(
 
     # get array(s) from the dataset
     if BANDSMODE == 0:
-        pxlV = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
+        pxData = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
 
     elif BANDSMODE == 1:
-        pxlV = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
+        pxData = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
 
     elif BANDSMODE == 2:
         band1 = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-        pxlV = np.array([band1])
+        pxData = np.array([band1])
         for index in indexToLoad[1:]:
             band = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-            pxlV = np.append(pxlV, [band], axis=0)
+            pxData = np.append(pxData, [band], axis=0)
 
     print(os.path.basename(targetP + " loaded"))
 
-    return GeoIm(pxlV, (widthPix, heightPix, orX, orY), projection)
+    if len(pxData.shape) == 2:
+        geoGrid = GeoGrid(orX, orY, widthPix, heightPix, pxData.shape[0], pxData.shape[1], projection)
+
+    if len(pxData.shape) == 3:
+        geoGrid = GeoGrid(orX, orY, widthPix, heightPix, pxData.shape[1], pxData.shape[2], projection)
+
+    return GeoIm(pxData, geoGrid)
 
 def openManyGeoRasters(
     folder,
@@ -432,30 +507,30 @@ def stackGeoIm(list_GeoIm):
 
     :params:
     --------
-        list_GeoIm (list) : a list containing 2 or more GeoIm objects. They must have the same geoData and the same CRS.
+        list_GeoIm (list) : a list containing 2 or more GeoIm objects. They must have the same geoGrid and the same CRS.
     
     :returns:
     ---------
-        a new GeoIm object with pxlV in 3 dimensions. The number of the bands is the same than the order of the GeoIm in list_GeoIm.
+        a new GeoIm object with pxData in 3 dimensions. The number of the bands is the same than the order of the GeoIm in list_GeoIm.
     """
     
     # Inputs Checking
     try :
-        std_geoData = list_GeoIm[0].geoData
+        std_geoGrid = list_GeoIm[0].geoGrid
         std_crs = list_GeoIm[0].crs
 
         for elt in list_GeoIm:
-            if std_geoData != elt.geoData or std_crs != elt.crs:
+            if std_geoGrid != elt.geoGrid or std_crs != elt.crs:
                 raise ValueError("All the GeoIm objects must have the same resolution, the same origin x and y and the same CRS")
     
     except AttributeError:
         print("error 13: stackGeoIm take a list of GeoIm objects")
 
     # Process
-    B1 = list_GeoIm[0].pxlV
+    B1 = list_GeoIm[0].pxData
     stack = np.array([B1])
     for elt in list_GeoIm[1:]:
-        stack = np.append(stack, [elt.pxlV], axis=0)
+        stack = np.append(stack, [elt.pxData], axis=0)
 
     # Return    
-    return GeoIm(stack, std_geoData, std_crs)
+    return GeoIm(stack, std_geoGrid, std_crs)
