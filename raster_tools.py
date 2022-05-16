@@ -52,6 +52,11 @@ class GeoGrid:
         self.xRight = xLeft + cols * cellLengthX
         self.yBottom = yTop + rows * cellLengthY
 
+        # Compute shapely geometry extent
+        self.shplyGeom = shapely.geometry.Polygon(
+            [(self.xLeft, self.yTop),(self.xLeft, self.yBottom),(self.xRight, self.yBottom),(self.xRight, self.yTop),(self.xLeft, self.yTop)]
+        )
+
     def compute_ogr_extent(self):
         """
         :return:
@@ -73,31 +78,28 @@ class GeoGrid:
 
         return polygon_env
 
-    def compute_shapely_extent(self):
+    def extent_to_shapefile(self, out_path):
         """
         :return:
         --------
-            a shapely geometry object which represent the spatial extent of the GeoGrid
+            None. Create a shapefile containing the extent to the given path.
         """
-        extent = [
-            (self.xLeft, self.yTop),
-            (self.xLeft, self.yBottom),
-            (self.xRight, self.yBottom),
-            (self.xRight, self.yTop),
-            (self.xLeft, self.yTop)]
+        line_data = gpd.GeoSeries({"geometry":self.shplyGeom})
+        gdf_extent = gpd.GeoDataFrame([line_data])
+        gdf_extent.set_crs(self.crs, inplace=True)
+        gdf_extent.to_file(out_path)
+        return None
 
-        return shapely.geometry.Polygon(extent)
-
-    def compute_gdf_grid(self):
+    def compute_gdf_grid(self, out_path=None):
         """
         :return:
         --------
-            a geoGridFrame where each line represent a square grid cell
+            a GeoDataFrame where each line represent a square grid cell
         """
 
         cells = []
         for row in range(self.rows):
-            print("row {}/{}".format(row, self.rows-1))
+            # print("row {}/{}".format(row, self.rows-1))
             for col in range(self.cols):
                 cell_xLeft = self.xLeft + self.cellLengthX * col
                 cell_xRight = self.xLeft + self.cellLengthX * (col + 1)
@@ -115,19 +117,36 @@ class GeoGrid:
 
                 cell_data["geometry"] = shapely.geometry.Polygon(cell_geom)
                 cells.append(gpd.GeoSeries(cell_data))
-        grid = gpd.geoGridFrame(cells)
+        grid = gpd.GeoDataFrame(cells)
         grid.set_crs(self.crs, inplace=True)
+
+        if out_path != None:
+            grid.to_file(out_path)
         return grid
 
-class GeoIm:
+    def common_extent_with(self, neighboor):
+        return self.shplyGeom.intersection(neighboor.shplyGeom)
 
+def print_shapely_geom(shplyGeom, out_path, crs):
+    """
+    :return:
+    --------
+        None. Create a shapefile containing the extent of the shapely object to the given path.
+    """
+    line_data = gpd.GeoSeries({"geometry":shplyGeom})
+    gdf_extent = gpd.GeoDataFrame([line_data])
+    gdf_extent.set_crs(crs, inplace=True)
+    gdf_extent.to_file(out_path)
+    return None
+
+class GeoIm:
     """
     Describe a georeferenced raster.
     
     attributes
     ----------
         pxData (np.ndarray) : an array representing the pixels values
-        geoGrid (tuple) : a GeoGrid object representing the pixel-grid
+        geoGrid (tuple) : a GeoGrid object representing the pixels grid
     """
 
     def __init__(self, pxData, geoGrid):
@@ -236,6 +255,7 @@ def openGeoRaster(
     res = None,
     algo = "near",
     numFormat = np.float32,
+    geoGridMode = False
     ):
 
     """
@@ -252,6 +272,7 @@ def openGeoRaster(
         res (int or float) : if you want to resample the image, you give the new resolution here. The unit of the value must be in the unit of the target crs.
         algo (str) : the resample algorithm you want to use. Resample is computed with gdal.Warp(), so see the gdal api documentation to see the others available methods.
         format (np.dtype) : the numeric format of the array values
+        geoGridMode (bool) : if it's True, the function will just return the geoGrid associated to the target raster
     
     :return:
     --------
@@ -353,6 +374,10 @@ def openGeoRaster(
             raise ValueError("error 8 : The resolution must be a number")
         RESAMPLE = True
     
+    # Check geoGridMode
+    if type(geoGridMode) != bool:
+        print("geoGridMode must be a boolean")
+    
     # ----------------
     # # Loading data #
     # ----------------
@@ -390,6 +415,12 @@ def openGeoRaster(
         row2 = inDs.RasterYSize - 1
         col2 = inDs.RasterXSize - 1
 
+    geoGrid = GeoGrid(orX, orY, widthPix, heightPix, inDs.RasterYSize, inDs.RasterXSize, projection)
+
+    if geoGridMode:
+        print(os.path.basename(targetP + " geogrid loaded"))
+        return geoGrid
+
     # get array(s) from the dataset
     if BANDSMODE == 0:
         pxData = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
@@ -405,12 +436,6 @@ def openGeoRaster(
             pxData = np.append(pxData, [band], axis=0)
 
     print(os.path.basename(targetP + " loaded"))
-
-    if len(pxData.shape) == 2:
-        geoGrid = GeoGrid(orX, orY, widthPix, heightPix, pxData.shape[0], pxData.shape[1], projection)
-
-    if len(pxData.shape) == 3:
-        geoGrid = GeoGrid(orX, orY, widthPix, heightPix, pxData.shape[1], pxData.shape[2], projection)
 
     return GeoIm(pxData, geoGrid)
 
@@ -534,3 +559,4 @@ def stackGeoIm(list_GeoIm):
 
     # Return    
     return GeoIm(stack, std_geoGrid, std_crs)
+# %%
