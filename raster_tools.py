@@ -79,16 +79,7 @@ class GeoGrid:
         return polygon_env
 
     def extent_to_shapefile(self, out_path):
-        """
-        :return:
-        --------
-            None. Create a shapefile containing the extent to the given path.
-        """
-        line_data = gpd.GeoSeries({"geometry":self.shplyGeom})
-        gdf_extent = gpd.GeoDataFrame([line_data])
-        gdf_extent.set_crs(self.crs, inplace=True)
-        gdf_extent.to_file(out_path)
-        return None
+        print_shapely_geom(self.shplyGeom, out_path, self.crs)
 
     def compute_gdf_grid(self, out_path=None):
         """
@@ -132,6 +123,10 @@ def print_shapely_geom(shplyGeom, out_path, crs):
     :return:
     --------
         None. Create a shapefile containing the extent of the shapely object to the given path.
+    
+    -- this function is outside the class to be able to make shapefiles from just shapely.geometry,
+    not mandatory a full GeoGrid --
+
     """
     line_data = gpd.GeoSeries({"geometry":shplyGeom})
     gdf_extent = gpd.GeoDataFrame([line_data])
