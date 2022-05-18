@@ -1,7 +1,8 @@
+# Standard librairies
+import os
+
 # Third-Party librairies
-import numpy as np
-import geopandas as gpd
-from osgeo import gdal, gdalconst, ogr, osr
+from osgeo import gdal, gdalconst
 from matplotlib import pyplot as plt
 
 class GeoIm:
@@ -19,7 +20,7 @@ class GeoIm:
         self.geoGrid = geoGrid
 
     def __add__(self, neighboor):
-        res = self.pxData + neighboor.pxDatapytpython
+        res = self.pxData + neighboor.pxData
         x = GeoIm(res, self.geoGrid)
         return x
     
@@ -75,7 +76,7 @@ class GeoIm:
 
         # gdal.Dataset creation
         outDs = driver.Create(outP, cols, rows, nb_bands, format)
-        outDs.SetGeoTransform((self.geoGrid.xLeft, self.geoGrid.cellLengthX, 0.0, self.geoGrid.yTop, 0.0, self.geoGrid.cellLengthY))
+        outDs.SetGeoTransform((self.geoGrid.xMin, self.geoGrid.resX, 0.0, self.geoGrid.yMax, 0.0, self.geoGrid.resY))
         outDs.SetProjection(self.geoGrid.crs)
 
         # Export each band of the 3D array

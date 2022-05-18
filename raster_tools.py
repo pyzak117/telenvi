@@ -5,8 +5,7 @@ import re
 # Third-Party librairies
 import numpy as np
 import geopandas as gpd
-from osgeo import gdal, gdalconst, ogr, osr
-from matplotlib import pyplot as plt
+from osgeo import gdal, osr
 
 # Other pieces of telenvi
 from geogrid import GeoGrid
@@ -181,7 +180,14 @@ def openGeoRaster(
         row2 = inDs.RasterYSize - 1
         col2 = inDs.RasterXSize - 1
 
-    geoGrid = GeoGrid(orX, orY, widthPix, heightPix, inDs.RasterYSize, inDs.RasterXSize, projection)
+    geoGrid = GeoGrid(
+        xMin = orX, 
+        yMax = orY, 
+        resX = widthPix,
+        resY = heightPix,
+        rows = inDs.RasterYSize,
+        cols = inDs.RasterXSize,
+        crs = projection)
 
     if geoGridMode:
         print(os.path.basename(targetP + " geogrid loaded"))

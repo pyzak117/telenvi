@@ -1,8 +1,6 @@
 # Third-Party librairies
 import numpy as np
 import geopandas as gpd
-from osgeo import gdal, gdalconst, ogr, osr
-from matplotlib import pyplot as plt
 import shapely.geometry
 
 class GeoGrid:
