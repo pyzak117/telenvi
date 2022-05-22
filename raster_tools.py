@@ -5,11 +5,170 @@ import re
 # Third-Party librairies
 import numpy as np
 import geopandas as gpd
-from osgeo import gdal, osr
+from osgeo import gdal, gdalconst, ogr, osr
+from matplotlib import pyplot as plt
 
-# Other pieces of telenvi
-from geogrid import GeoGrid
-from geoim import GeoIm
+class GeoIm:
+
+    """
+    Describe a georeferenced raster.
+    
+    attributes
+    ----------
+        pxlV (np.ndarray) : an array representing the pixels values
+        geoData (tuple) : a tuple like
+            (
+                pixel_width, 
+                pixel_height,
+                originX,
+                originY
+            )
+        crs : a big string representing the coordinates reference system
+    """
+
+    def __init__(self, pxlV, geoData, crs):
+        self.pxlV = pxlV
+        self.geoData = geoData
+        self.crs = crs
+
+    def __add__(self, neighboor):
+        res = self.pxlV + neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+    
+    def __sub__(self, neighboor):
+        res = self.pxlV - neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+
+    def __mul__(self, neighboor):
+        res = self.pxlV * neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+
+    def __truediv__(self, neighboor):
+        res = self.pxlV / neighboor.pxlV
+        x = GeoIm(res, self.geoData, self.crs)
+        return x
+
+    def __repr__(self):
+        self.quickVisual()
+        return ""
+
+    def getCoordsExtent(self):
+        """
+        :return:
+        --------
+            bounding-box coordinates of the GeoIm's spatial extent
+        """
+
+        dim = len(self.pxlV.shape)
+
+        # Compute extent coordinates
+        pixW, pixH, xLeft, yTop = self.geoData
+        
+        if dim == 2:
+            rows, cols = self.pxlV.shape
+
+        elif dim == 3:
+            _, rows, cols = self.pxlV.shape
+        xRight = xLeft+cols*pixW
+        yBottom = yTop+rows*pixH
+
+        return (xLeft, yTop, xRight, yBottom)
+
+    def getGeomExtent(self):
+        """
+        :return:
+        --------
+            a ogr.Geometry object which represent the spatial extent of the GeoIm
+        """
+
+        # Get bounding box coordinates
+        xLeft, yTop, xRight, yBottom = self.getCoordsExtent()
+
+        # Create a ring
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        ring.AddPoint(xLeft, yTop)
+        ring.AddPoint(xLeft, yBottom)
+        ring.AddPoint(xRight, yBottom)
+        ring.AddPoint(xRight, yTop)
+        ring.AddPoint(xLeft, yTop)
+
+        # Assign this ring to a polygon
+        polygon_env = ogr.Geometry(ogr.wkbPolygon)
+        polygon_env.AddGeometry(ring)
+
+        return polygon_env
+
+    def exportAsRasterFile(
+        self,
+        outP,
+        format = gdalconst.GDT_Float32,
+        driverName = "GTiff"):
+
+        """
+        Export a GeoIm object into a raster file georeferenced.
+
+        :param:
+        -------
+            outP (str) : the path where you want to save the raster
+            format (gdalconst) : the image format
+            driverName (str) : the extension of the raster file
+        """
+
+        driver = gdal.GetDriverByName(driverName)
+
+        # Check if the array is 2D or 3D
+        dim = len(self.pxlV.shape)
+
+        if dim == 2:
+            nb_bands = 1
+            rows, cols = self.pxlV.shape
+
+        elif dim == 3:
+            nb_bands, rows, cols = self.pxlV.shape
+
+        else:
+            raise ValueError("Array must be in 2 or 3 dimensions")
+
+        # gdal.Dataset creation
+        outDs = driver.Create(outP, cols, rows, nb_bands, format)
+        outDs.SetGeoTransform((self.geoData[2], self.geoData[0], 0.0, self.geoData[3], 0.0, self.geoData[1]))
+        outDs.SetProjection(self.crs)
+
+        # Export each band of the 3D array
+        if dim == 3:
+            for band in range(1, nb_bands+1):
+                outDs.GetRasterBand(band).WriteArray(self.pxlV[band-1])
+
+        # Export the unique band
+        else:
+            outDs.GetRasterBand(1).WriteArray(self.pxlV)
+
+        outDs.FlushCache()
+        print("\n" + os.path.basename(outP) + " OK")
+        return None
+
+    def quickVisual(self, band = 0, colors = "viridis"):
+        """
+        Show the pixels values of a GeoIm object.
+
+        :param:
+        -------
+            band (int) : if the array of pixels values represent a multispectral image, with 3 dimensions, you can choose the band than you want to show here.
+            colors (str) : a string describing the color-range you want to use to show the image
+        """
+
+        if len(self.pxlV.shape) == 2:
+            plt.imshow(self.pxlV, cmap = colors)
+
+        elif len(self.pxlV.shape) == 3:
+            plt.imshow(self.pxlV[band], cmap = colors)
+
+        plt.show()
+        plt.close()
+        return None
 
 def openGeoRaster(
     targetP,
@@ -20,7 +179,6 @@ def openGeoRaster(
     res = None,
     algo = "near",
     numFormat = np.float32,
-    geoGridMode = False
     ):
 
     """
@@ -37,7 +195,6 @@ def openGeoRaster(
         res (int or float) : if you want to resample the image, you give the new resolution here. The unit of the value must be in the unit of the target crs.
         algo (str) : the resample algorithm you want to use. Resample is computed with gdal.Warp(), so see the gdal api documentation to see the others available methods.
         format (np.dtype) : the numeric format of the array values
-        geoGridMode (bool) : if it's True, the function will just return the geoGrid associated to the target raster
     
     :return:
     --------
@@ -94,30 +251,31 @@ def openGeoRaster(
             CROP = True
 
         elif type(roi) == str:
-            if roi[-4:].lower() == ".shp":
+            match roi[-4:].lower():
+                case ".shp":
 
-                # check ft input
-                if ft == None:
-                    raise ValueError("error 6 : ft parameter is empty")
+                    # check ft input
+                    if ft == None:
+                        raise ValueError("error 6 : ft parameter is empty")
 
-                # shapefile loading
-                layer = gpd.read_file(roi)
+                    # shapefile loading
+                    layer = gpd.read_file(roi)
 
-                # Feature geometry extraction
-                geom = layer["geometry"][ft].bounds
-                XMIN, YMAX = geom[0], geom[3]
-                XMAX, YMIN = geom[2], geom[1]
+                    # Feature geometry extraction
+                    geom = layer["geometry"][ft].bounds
+                    XMIN, YMAX = geom[0], geom[3]
+                    XMAX, YMIN = geom[2], geom[1]
 
-            else:
-                try:
-                    # get the common area between data_image and crop_image
-                    ds = gdal.Open(roi)
-                    XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
-                    XMAX = XMIN + (xPixSize * (ds.RasterXSize))
-                    YMIN = YMAX + (yPixSize * (ds.RasterYSize))
-                
-                except AttributeError:
-                    print("error 6.2 : invalid raster region of interest")
+                case _:
+                    try:
+                        # get spatial extent of the raster
+                        ds = gdal.Open(roi)
+                        XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
+                        XMAX = XMIN + (xPixSize * ds.RasterXSize)
+                        YMIN = YMAX + (yPixSize * ds.RasterYSize)
+                    
+                    except AttributeError:
+                        print("error 6.2 : invalid raster region of interest")
 
             # Crop mode activate
             CROP = True
@@ -138,10 +296,6 @@ def openGeoRaster(
         if type(res) != float and type(res) != int:
             raise ValueError("error 8 : The resolution must be a number")
         RESAMPLE = True
-    
-    # Check geoGridMode
-    if type(geoGridMode) != bool:
-        print("geoGridMode must be a boolean")
     
     # ----------------
     # # Loading data #
@@ -180,36 +334,23 @@ def openGeoRaster(
         row2 = inDs.RasterYSize - 1
         col2 = inDs.RasterXSize - 1
 
-    geoGrid = GeoGrid(
-        xMin = orX, 
-        yMax = orY, 
-        resX = widthPix,
-        resY = heightPix,
-        rows = inDs.RasterYSize,
-        cols = inDs.RasterXSize,
-        crs = projection)
-
-    if geoGridMode:
-        print(os.path.basename(targetP + " geogrid loaded"))
-        return geoGrid
-
     # get array(s) from the dataset
     if BANDSMODE == 0:
-        pxData = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
+        pxlV = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
 
     elif BANDSMODE == 1:
-        pxData = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
+        pxlV = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
 
     elif BANDSMODE == 2:
         band1 = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-        pxData = np.array([band1])
+        pxlV = np.array([band1])
         for index in indexToLoad[1:]:
             band = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-            pxData = np.append(pxData, [band], axis=0)
+            pxlV = np.append(pxlV, [band], axis=0)
 
     print(os.path.basename(targetP + " loaded"))
 
-    return GeoIm(pxData, geoGrid)
+    return GeoIm(pxlV, (widthPix, heightPix, orX, orY), projection)
 
 def openManyGeoRasters(
     folder,
@@ -304,31 +445,30 @@ def stackGeoIm(list_GeoIm):
 
     :params:
     --------
-        list_GeoIm (list) : a list containing 2 or more GeoIm objects. They must have the same geoGrid and the same CRS.
+        list_GeoIm (list) : a list containing 2 or more GeoIm objects. They must have the same geoData and the same CRS.
     
     :returns:
     ---------
-        a new GeoIm object with pxData in 3 dimensions. The number of the bands is the same than the order of the GeoIm in list_GeoIm.
+        a new GeoIm object with pxlV in 3 dimensions. The number of the bands is the same than the order of the GeoIm in list_GeoIm.
     """
     
     # Inputs Checking
     try :
-        std_geoGrid = list_GeoIm[0].geoGrid
+        std_geoData = list_GeoIm[0].geoData
         std_crs = list_GeoIm[0].crs
 
         for elt in list_GeoIm:
-            if std_geoGrid != elt.geoGrid or std_crs != elt.crs:
+            if std_geoData != elt.geoData or std_crs != elt.crs:
                 raise ValueError("All the GeoIm objects must have the same resolution, the same origin x and y and the same CRS")
     
     except AttributeError:
         print("error 13: stackGeoIm take a list of GeoIm objects")
 
     # Process
-    B1 = list_GeoIm[0].pxData
+    B1 = list_GeoIm[0].pxlV
     stack = np.array([B1])
     for elt in list_GeoIm[1:]:
-        stack = np.append(stack, [elt.pxData], axis=0)
+        stack = np.append(stack, [elt.pxlV], axis=0)
 
-    # Return    
-    return GeoIm(stack, std_geoGrid, std_crs)
-
+    # Return
+    return GeoIm(stack, std_geoData, std_crs)
