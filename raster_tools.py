@@ -7,6 +7,7 @@ import numpy as np
 import geopandas as gpd
 from osgeo import gdal, gdalconst, ogr, osr
 from matplotlib import pyplot as plt
+import shapely
 
 class GeoIm:
 
@@ -65,19 +66,19 @@ class GeoIm:
         dim = len(self.pxlV.shape)
 
         # Compute extent coordinates
-        pixW, pixH, xLeft, yTop = self.geoData
+        pixW, pixH, xMin, yMax = self.geoData
         
         if dim == 2:
             rows, cols = self.pxlV.shape
 
         elif dim == 3:
             _, rows, cols = self.pxlV.shape
-        xRight = xLeft+cols*pixW
-        yBottom = yTop+rows*pixH
+        xMax = xMin+cols*pixW
+        yMin = yMax+rows*pixH
 
-        return (xLeft, yTop, xRight, yBottom)
+        return (xMin, yMax, xMax, yMin)
 
-    def getGeomExtent(self):
+    def getGeomExtent(self, mode = "ogr"):
         """
         :return:
         --------
@@ -85,21 +86,61 @@ class GeoIm:
         """
 
         # Get bounding box coordinates
-        xLeft, yTop, xRight, yBottom = self.getCoordsExtent()
+        xMin, yMax, xMax, yMin = self.getCoordsExtent()
 
-        # Create a ring
-        ring = ogr.Geometry(ogr.wkbLinearRing)
-        ring.AddPoint(xLeft, yTop)
-        ring.AddPoint(xLeft, yBottom)
-        ring.AddPoint(xRight, yBottom)
-        ring.AddPoint(xRight, yTop)
-        ring.AddPoint(xLeft, yTop)
+        if mode == "ogr":
 
-        # Assign this ring to a polygon
-        polygon_env = ogr.Geometry(ogr.wkbPolygon)
-        polygon_env.AddGeometry(ring)
+            # Create a ring
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            ring.AddPoint(xMin, yMax)
+            ring.AddPoint(xMin, yMin)
+            ring.AddPoint(xMax, yMin)
+            ring.AddPoint(xMax, yMax)
+            ring.AddPoint(xMin, yMax)
+
+            # Assign this ring to a polygon
+            polygon_env = ogr.Geometry(ogr.wkbPolygon)
+            polygon_env.AddGeometry(ring)
+
+        elif mode == "shply":
+            polygon_env = shapely.geometry.Polygon(
+                [(xMin, yMax),(xMin, yMin),(xMax, yMin),(xMax, yMax),(xMin, yMax)]
+            )
 
         return polygon_env
+
+    def clip(self, neighboor):
+
+        # neighboor = a GeoIm we use as a pattern to clip the other GeoIm
+
+        # Shapely geometry of the 2 GeoIm to intersect
+        a_extent = self.getGeomExtent(mode="shply")
+        b_extent = neighboor.getGeomExtent(mode="shply")
+
+        # Shapely geometry of the intersection area
+        i_extent = a_extent.intersection(b_extent)
+
+        # Get data of this intersection area
+        i_xMin, i_yMin, i_xMax, i_yMax = i_extent.bounds
+        i_xLen = i_xMax - i_xMin
+        i_yLen = i_yMax - i_yMin
+
+        # Get coordinates of full a_GeoIm
+        a_xMin, a_resX, a_yMax, a_resY = self.geoData
+
+        # Compute matrixian coordinates in the a_GeoIm of the area to extract
+        ar_xMin = int((i_xMin - a_xMin) / a_resX)
+        ar_yMin = int(abs(i_yMax - a_yMax) / a_resY)
+        ar_xMax = ar_xMin + (int(abs(i_xLen / a_resX)))
+        ar_yMax = ar_yMin + (int(abs(i_yLen / a_resY)))
+
+        # extraction of the data in A on the intersection area
+        a_data_on_i = self.pxlV[ar_yMin:ar_yMax, ar_xMin:ar_xMax]
+
+        return GeoIm(
+            pxlV = a_data_on_i,
+            geoData = (ar_xMin, self.geoData[1], ar_yMax, self.geoData[3]),
+            crs = self.crs)
 
     def exportAsRasterFile(
         self,
