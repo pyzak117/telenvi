@@ -109,37 +109,37 @@ class GeoIm:
 
         return polygon_env
 
-    def clip(self, neighboor):
+    def clip(self, slave):
 
-        # neighboor = a GeoIm we use as a pattern to clip the other GeoIm
+        # slave = a GeoIm we use as a pattern to clip the reference GeoIm
+
+        # Get origin coordinates of reference image and his resolution x and y
+        resX_ref, resY_ref, xMin_ref, yMax_ref = self.geoData
 
         # Shapely geometry of the 2 GeoIm to intersect
-        a_extent = self.getGeomExtent(mode="shply")
-        b_extent = neighboor.getGeomExtent(mode="shply")
+        ref_extent = self.getGeomExtent(mode="shply")
+        slave_extent = slave.getGeomExtent(mode="shply")
 
-        # Shapely geometry of the intersection area
-        i_extent = a_extent.intersection(b_extent)
+        # Intersection
+        inter_extent = ref_extent.intersection(slave_extent)
+        xMin_inter, yMin_inter, xMax_inter, yMax_inter = inter_extent.bounds
 
-        # Get data of this intersection area
-        i_xMin, i_yMin, i_xMax, i_yMax = i_extent.bounds
-        i_xLen = i_xMax - i_xMin
-        i_yLen = i_yMax - i_yMin
-
-        # Get coordinates of full a_GeoIm
-        a_xMin, a_resX, a_yMax, a_resY = self.geoData
-
-        # Compute matrixian coordinates in the a_GeoIm of the area to extract
-        ar_xMin = int((i_xMin - a_xMin) / a_resX)
-        ar_yMin = int(abs(i_yMax - a_yMax) / a_resY)
-        ar_xMax = ar_xMin + (int(abs(i_xLen / a_resX)))
-        ar_yMax = ar_yMin + (int(abs(i_yLen / a_resY)))
+        # Matrixian conversion of the intersection area
+        firstRow = int((yMax_inter - yMax_ref) / resY_ref)
+        lastRow = int((yMin_inter - yMax_ref) / resY_ref)
+        firstCol = int((xMin_inter - xMin_ref) / resX_ref)
+        lastCol = int((xMax_inter - xMin_ref) / resX_ref)
 
         # extraction of the data in A on the intersection area
-        a_data_on_i = self.pxlV[ar_yMin:ar_yMax, ar_xMin:ar_xMax]
+        if len(self.pxlV.shape) == 2:
+            data_inter = self.pxlV[firstRow:lastRow, firstCol:lastCol]
 
+        elif len(self.pxlV.shape) == 3:
+            data_inter = np.array([band[firstRow:lastRow, firstCol:lastCol] for band in self.pxlV])
+    
         return GeoIm(
-            pxlV = a_data_on_i,
-            geoData = (ar_xMin, self.geoData[1], ar_yMax, self.geoData[3]),
+            pxlV = data_inter,
+            geoData = (self.geoData[0], self.geoData[1], xMin_inter, yMax_inter),
             crs = self.crs)
 
     def exportAsRasterFile(
@@ -292,31 +292,30 @@ def openGeoRaster(
             CROP = True
 
         elif type(roi) == str:
-            match roi[-4:].lower():
-                case ".shp":
+            if roi[-4:].lower() == ".shp":
 
-                    # check ft input
-                    if ft == None:
-                        raise ValueError("error 6 : ft parameter is empty")
+                # check ft input
+                if ft == None:
+                    raise ValueError("error 6 : ft parameter is empty")
 
-                    # shapefile loading
-                    layer = gpd.read_file(roi)
+                # shapefile loading
+                layer = gpd.read_file(roi)
 
-                    # Feature geometry extraction
-                    geom = layer["geometry"][ft].bounds
-                    XMIN, YMAX = geom[0], geom[3]
-                    XMAX, YMIN = geom[2], geom[1]
+                # Feature geometry extraction
+                geom = layer["geometry"][ft].bounds
+                XMIN, YMAX = geom[0], geom[3]
+                XMAX, YMIN = geom[2], geom[1]
 
-                case _:
-                    try:
-                        # get spatial extent of the raster
-                        ds = gdal.Open(roi)
-                        XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
-                        XMAX = XMIN + (xPixSize * ds.RasterXSize)
-                        YMIN = YMAX + (yPixSize * ds.RasterYSize)
-                    
-                    except AttributeError:
-                        print("error 6.2 : invalid raster region of interest")
+            else :
+                try:
+                    # get spatial extent of the raster
+                    ds = gdal.Open(roi)
+                    XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
+                    XMAX = XMIN + (xPixSize * ds.RasterXSize)
+                    YMIN = YMAX + (yPixSize * ds.RasterYSize)
+
+                except AttributeError:
+                    print("error 6.2 : invalid raster to clip on")
 
             # Crop mode activate
             CROP = True
@@ -359,6 +358,7 @@ def openGeoRaster(
     heightPix = geoTransform[5]
 
     if CROP:
+
         # Transform geographic coordinates of the region of interest into matrix coordinates
         row1 = int((YMAX-orY)/heightPix)
         col1 = int((XMIN-orX)/widthPix)
