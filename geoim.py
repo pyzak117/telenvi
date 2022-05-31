@@ -7,10 +7,6 @@ from osgeo import gdal, gdalconst
 from matplotlib import pyplot as plt
 from PIL import Image, ImageEnhance
 
-# telenvi
-from telenvi.geogrid import GeoGrid
-from telenvi import raster_tools as rt
-
 class GeoIm:
 
     """
@@ -41,7 +37,7 @@ class GeoIm:
     """
 
     def geogrid_fit_on_pxData(self):
-        return rt.grid_vs_array(self.geogrid, self.pxData)
+        return geogrid_is_valid_from_pxData(self.geogrid, self.pxData)
 
     def __init__(self, pxData, geogrid):        
 
@@ -282,3 +278,28 @@ class GeoIm:
 
         # Return PIL.Image instance
         return rgb
+
+def geogrid_is_valid_from_pxData(geogrid, array):
+    """
+    Check the compatibility of a geogrid with an array
+    """
+
+    # Get the dimensions of the array array
+    dims = len(array.shape)
+
+    if dims == 2:
+        data_nRows, data_nCols = array.shape
+
+    elif dims == 3:
+        data_nRows = array.shape[1]
+        data_nCols = array.shape[2]
+
+    else:
+        raise ValueError("A array array must have 2 or 3 dimensions")
+
+    # Compare geogrid attributes and array attributes
+    cols_compatibility = data_nCols == geogrid.nCols
+    rows_compatibility = data_nRows == geogrid.nRows
+
+    # return a boolean
+    return cols_compatibility == rows_compatibility == True

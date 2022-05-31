@@ -1,41 +1,14 @@
 #%% Standard librairies
 import os
-import re
-from turtle import colormode
 
 # Third-Party librairies
 import numpy as np
 import geopandas as gpd
 from osgeo import gdal
 
-# telenvi
+# other pieces of telenvi module
 from telenvi.geogrid import GeoGrid
 from telenvi.geoim import GeoIm
-
-def grid_vs_array(geogrid, array):
-    """
-    Check the compatibility of a geogrid with an array
-    """
-
-    # Get the dimensions of the array array
-    dims = len(array.shape)
-
-    if dims == 2:
-        data_nRows, data_nCols = array.shape
-
-    elif dims == 3:
-        data_nRows = array.shape[1]
-        data_nCols = array.shape[2]
-
-    else:
-        raise ValueError("A array array must have 2 or 3 dimensions")
-
-    # Compare geogrid attributes and array attributes
-    cols_compatibility = data_nCols == geogrid.nCols
-    rows_compatibility = data_nRows == geogrid.nRows
-
-    # return a boolean
-    return cols_compatibility == rows_compatibility == True
 
 def openGeoRaster(
     target_path,
