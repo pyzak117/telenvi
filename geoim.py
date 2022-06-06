@@ -87,14 +87,13 @@ class GeoIm:
         if old_grid.crs != new_grid.crs :
             raise AttributeError("The new_grid and old_grid geogrid have not the same CRS")
 
-        # Intersect the grids
-        # inter_grid = old_grid.intersect(teacher = new_grid)
-
-        # Get bounds of the intersection between the new and the old geogrid
+        # Get bounds of the new geogrid
         firstRow= int((new_grid.yMax - old_grid.yMax) / old_grid.yRes)
         firstCol= int((new_grid.xMin - old_grid.xMin) / old_grid.xRes)
         lastRow = int((new_grid.yMin - old_grid.yMax) / old_grid.yRes)
         lastCol = int((new_grid.xMax - old_grid.xMin) / old_grid.xRes)
+
+        print(firstRow, firstCol, lastRow, lastCol)
 
         # Create PIL.Image instance from the data
         im_data = Image.fromarray(old_data)
@@ -141,21 +140,21 @@ class GeoIm:
 
         elif mode == "shply":
             return self.geogrid.getShapelyExtent()
-    
-    def exportAsRasterFile(
+ 
+    def toDs(
         self,
-        outP,
+        outpath = "",
         f_format = gdalconst.GDT_Float32,
-        driverName = "GTiff"):
+        driverName = "MEM"):
 
         """
-        Export a GeoIm object into a raster file georeferenced.
+        build a gdal.Dataset from a GeoIm instance
 
         :params:
         --------
-            outP (str) : the path where you want to save the raster
-            f_format (gdalconst) : the image file format
-            driverName (str) : the extension of the raster file
+            outpath : str - the path where you want to save the raster - default : ""
+            f_format : gdalconst - the numeric pixel values format - default : float32
+            driverName : str - the extension of the raster file - default : "MEM" for 'memory'
         """
 
         driver = gdal.GetDriverByName(driverName)
@@ -174,7 +173,7 @@ class GeoIm:
             raise ValueError("Array must be in 2 or 3 dimensions")
 
         # gdal.Dataset creation
-        outDs = driver.Create(outP, cols, rows, nb_bands, f_format)
+        outDs = driver.Create(outpath, cols, rows, nb_bands, f_format)
         outDs.SetGeoTransform((self.geogrid.xMin, self.geogrid.xRes, 0.0, self.geogrid.yMax, 0.0, self.geogrid.yRes))
         outDs.SetProjection(self.geogrid.crs)
 
@@ -187,10 +186,9 @@ class GeoIm:
         else:
             outDs.GetRasterBand(1).WriteArray(self.pxData)
 
-        outDs.FlushCache()
-        print("\n" + os.path.basename(outP) + " OK")
-        return None
-    
+        # outDs.FlushCache()
+        return outDs
+        
     def quickVisual(self, band = 0, colors = "viridis"):
         """
         Show the data as an image

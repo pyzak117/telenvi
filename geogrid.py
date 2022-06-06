@@ -2,6 +2,7 @@
 import geopandas as gpd
 from osgeo import ogr
 import shapely
+import math
 
 class GeoGrid:
     
@@ -233,8 +234,8 @@ class GeoGrid:
         yLen = yMax - yMin
 
         # Compute number of rows and cols
-        nCols = int(abs(xLen / xRes))
-        nRows = int(abs(yLen / yRes))
+        nCols = math.ceil(abs(xLen / xRes))
+        nRows = math.ceil(abs(yLen / yRes))
 
         # Compute grid dimensions
         return GeoGrid(xMin, yMax, xRes, yRes, nCols, nRows, crs)

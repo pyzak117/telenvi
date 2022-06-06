@@ -1,0 +1,2 @@
+- possibilité de créer un nouveau GeoIm facilement en ne renseignant, pour sa GeoGrid, que xMin, yMax, resX, resY. Et les nb lignes / cols sont calculés à partir du pxData.
+- ligne noire après des resample avec openGeoRaster ? Est-ce que ça vient de la GeoGrid ?

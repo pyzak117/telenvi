@@ -4,11 +4,11 @@ import os
 # Third-Party librairies
 import numpy as np
 import geopandas as gpd
-from osgeo import gdal
+from osgeo import gdal, osr
 
 # other pieces of telenvi module
-from telenvi.geogrid import GeoGrid
-from telenvi.geoim import GeoIm
+from geogrid import GeoGrid
+from geoim import GeoIm
 
 def openGeoRaster(
     target_path,
