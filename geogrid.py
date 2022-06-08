@@ -61,15 +61,15 @@ class GeoGrid:
             raise ValueError("nRows or nCols not integer")
 
         # Get known attributes
-        if type(crs) == int:
-            crs = "epsg:{}".format(crs)
-        self.crs = crs
         self.xMin = xMin
         self.yMax = yMax
         self.xRes = xRes
         self.yRes = yRes
         self.nCols = nCols
         self.nRows = nRows
+
+        if type(crs) == int:
+            crs = "epsg:{}".format(crs)
         self.crs = crs
 
         # Compute unknown attributes
@@ -79,7 +79,9 @@ class GeoGrid:
         self.yMin = self.yMax - self.yLen
 
     def __repr__(self):
-        print(self.__dict__)
+        attributes = self.__dict__.copy()
+        attributes.pop("crs")
+        print(attributes)
         return ""
     
     def getOGRextent(self):
@@ -87,6 +89,7 @@ class GeoGrid:
         return a ogr.Geometry
         representing the spatial extent of the grid
         """
+        
         # Create a ring
         ring = ogr.Geometry(ogr.wkbLinearRing)
         ring.AddPoint(self.geogrid.xMin, self.geogrid.yMax)
@@ -239,3 +242,16 @@ class GeoGrid:
 
         # Compute grid dimensions
         return GeoGrid(xMin, yMax, xRes, yRes, nCols, nRows, crs)
+
+def createGeoGridFromArray(array, xMin, yMax, xRes, yRes, crs):
+    
+    # Find nRows and nCols from array
+    dims = len(array.shape)
+    if dims == 2:
+        nRows, nCols = array.shape
+    elif dims == 3:
+        _, nRows, nCols = array.shape
+    
+    # Create Geogrid
+    return GeoGrid(xMin, yMax, xRes, yRes, nCols, nRows, crs=crs)
+
