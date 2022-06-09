@@ -126,7 +126,7 @@ class GeoIm:
             print(ds.RasterYSize)
 
             # Get back to array with crop
-            self.array = ds.ReadAsArray(firstCol, firstRow, lastCol-firstCol, lastRow-firstRow).astype(self.)
+            self.array = ds.ReadAsArray(firstCol, firstRow, lastCol-firstCol, lastRow-firstRow)
 
         # If the resolution is different, the following instructions will not be ran
         elif inter_grid.nRows != self.geogrid.nRows or inter_grid.nCols != self.geogrid.nCols:
