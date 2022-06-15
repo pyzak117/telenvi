@@ -26,30 +26,30 @@ class GeoIm:
     attributes
     ----------
 
-        name  | type       | short description
-        ---------------------------------------------------------------------------------
-        array | np.ndarray |  each pixel is charachterized by one or many values. 
-                              Here, they're stored in an object called array or matrix. 
-                              
-                              This array have 2 dimensions (x,y) if the image 
-                              represented is monospectral (only one channel),
-                              and in this case, each pixel is just one numerical value.
-
-                              But the array can have 3 dimensions (channel, x, y) 
-                              if the image is multispectral. 
-
-                              This mean the image was acquired with many shortwaves 
-                              length, and this is how we build some color images 
-                              with a red, a blue and a green channel, for example.
-        
-        ----------------------------------------------------------------------------------
-        ds    | gdal.Dataset| Contain all the geo-attributes of the image : the dimensions 
-                              of the space unit represented by his pixels (wrongly commonly 
-                              called "spatial resolution"), the coordinates of his origin
-                              point, the name of the Coordinates System Reference in which
-                              are wrote this coordinates... 
-        ----------------------------------------------------------------------------------
+        name        | type       | short description
+            --------------------------------------------------------------------------------------------
+        array       | np.ndarray |  each pixel is charachterized by one or many values. 
+                    |            |  Here, they're stored in an object called array or matrix. 
+                    |            |                                
+                    |            |  This array have 2 dimensions (x,y) if the image 
+                    |            |  represented is monospectral (only one channel),
+                    |            |  and in this case, each pixel is just one numerical value.
+                    |            |  
+                    |            |  But the array can have 3 dimensions (channel, x, y) 
+                    |            |  if the image is multispectral. 
+                    |            |  
+                    |            |  This mean the image was acquired with many shortwaves 
+                    |            |  length, and this is how we build some color images 
+                    |            |  with a red, a blue and a green channel, for example.
+            --------------------------------------------------------------------------------------------
+        ds          |gdal.Dataset|  Contain all the geo-attributes of the image : the dimensions 
+                    |            |  of the space unit represented by his pixels (wrongly commonly 
+                    |            |  called "spatial resolution"), the coordinates of his origin
+                    |            |  point, the name of the Coordinates System Reference in which
+                    |            |  are wrote this coordinates... 
+            --------------------------------------------------------------------------------------------
         ds_encoding | gdalconst | the instance's osgeo.gdal.Dataset format
+            --------------------------------------------------------------------------------------------
         ar_encoding | np.ndtype | the instance's array numeric format
 
 
@@ -66,45 +66,46 @@ class GeoIm:
             one is called "shape" to looks like the .shape attribute of a numpy.ndarray.
 
              name               | arguments             | short description
-            ------------------------------------------------------------------------------------------------------------------
+            --------------------------------------------------------------------------------------------
              getOriginPoint     |                       | send a tuple : (originX, originY) 
                                 |                       | this coordinates are wrote in the 
                                 |                       | Coordinates Reference System 
                                 |                       | of the image
-
+            --------------------------------------------------------------------------------------------
              getPixelSize       |                       | send a tuple : (resX, resY)
                                 |                       |  or (pixelSizeX, pixelSizeY)
-
+            --------------------------------------------------------------------------------------------
              getCoordsExtent    |                       | send a tuple : 
                                 |                       | (xMin, yMin, xMax, yMax)
-
+            --------------------------------------------------------------------------------------------
              getGeomExtent      | mode : str            | send a geometry. If the mode is "ogr", 
                                 | default = "ogr"       | it's osgeo.ogr.geometry object. If 
                                 |                       | the mode is "shapely", it send a 
                                 |                       | shapely.geometry.Polygon. 
-
+            --------------------------------------------------------------------------------------------
              shape              |                       | send a tuple : 
                                 |                       | (numberOfBands, 
                                 |                       |  numberOfRows, 
                                 |                       |  numberOfCols)
-
+            --------------------------------------------------------------------------------------------
              copy               |                       | send a new GeoIm instance, 
                                 |                       | which is a copy of this from where 
                                 |                       | the method is called
+            --------------------------------------------------------------------------------------------
 
         Part 2 : the setters
             This kind of methods will help you to manipulate your GeoIm instances: You can
             change the size-space unit of the pixels of an image, the SCR, the origin point...
 
              name               | arguments             | short description
-            ------------------------------------------------------------------------------------------------------------------
+            --------------------------------------------------------------------------------------------
              setOriginPoint     |                       | offsetX is added to the origin X of the GeoIm.
                                 | offsetX : float       | offsetY is added to the origin Y of the GeoIm.
                                 | offsetY : float       | if inplace, change the originPoint of the instance.
                                 | inplace : bool        | It can be used to literally move the image in space.
                                 |   default = True      | if not inplace, send a new geoim
                                 |                       | with the new origin.
-                                
+            --------------------------------------------------------------------------------------------
              cropFromVector     | vector : str          | vector can be a path to a shapefile.
                                 |   or shapely.geometry | In this case, the argument polygon
                                 | polygon : int         | is used to extract only one polygon
@@ -112,15 +113,15 @@ class GeoIm:
                                 |                       | next converted in shapely.geometry.
                                 |                       | Polygon. Or, vector can be directly
                                 |                       | a shapely geometry Polygon.
-            
+            --------------------------------------------------------------------------------------------
             cropFromRaster      |master_ds : str        | master_ds mean the dataset on which
                                 |  or osgeo.gdal.Dataset| the input GeoIm is cropped. It 
                                 |                       | either a path to raster, or dir
                                 |                       | an osgeo.gdal.Dataset object. 
-
+            --------------------------------------------------------------------------------------------
             cropFromIndex       |index : tuple          | index indicate the part of the array
                                 |(col1,row1,col2,row2)  | the user want to select.
-
+            --------------------------------------------------------------------------------------------
             resize              | xRes : float or int   | modify the size of the space-unit
                                 |   the new pixel size  | represented by each pixel of the 
                                 |   along the X axe     | GeoIm instance's. 
@@ -140,16 +141,27 @@ class GeoIm:
                                 |       "q1"            |
                                 |       "q3"            |
                                 |       "sum"           |
-
-            stack               | ls_geoims             | make a geoim with multiple channels.
-                                |                       | each geoim in the ls_geoims must have
+            --------------------------------------------------------------------------------------------
+            stack               | ls_geoim : list       | make a geoim with multiple channels.
+                                |                       | each geoim in the ls_geoim must have
                                 |                       | precisely the same number of rows and
                                 |                       | columns. 
-
+            --------------------------------------------------------------------------------------------
             save                | outpath : str         | write the geoim into a raster file.
                                 | driverName:file format|
                                 |   default = "GTiff"   |
-
+            --------------------------------------------------------------------------------------------            
+            merge               | ls_geoim : list       | send a geoim containing the instance 
+                                |                       |  + all the geoims contained in ls_geoim
+            --------------------------------------------------------------------------------------------
+            makeMosaic          | nbSquaresByAx : int   | send a list containing others geoims,
+                                |                       | which are a part of the instance.
+                                |                       | For example, if nbSquaresByAx = 2,
+                                |                       | you get a list with 4 geoims.
+                                |                       | The first is the top left part of the current geoim,
+                                |                       | the second is his bottom left part,
+                                |                       | the third is his top right part,
+                                |                       | and the last is his bottom left part.
     """
 
     def __init__(self, GDALdataset, ds_encoding = gdalconst.GDT_Float32, array_encoding = np.float32):
