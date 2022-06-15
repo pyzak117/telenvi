@@ -23,7 +23,7 @@ from telenvi import raster_tools as rt
 ```
 
 ## How to
-check the tests_3.0.0.html available on github.com/pyzak117/telenvi to see what the telenvi module has in store !
+check the tests_3.0.0.ipynb available on https://github.com/pyzak117/telenvi to see what the telenvi module has in store !
 
 # Contact
 You can contact me at thibaut.duvanel@univ-savoie.fr if you have any questions :)
