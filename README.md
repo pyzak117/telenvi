@@ -18,7 +18,7 @@ pip install telenvi
 ## Use from a python script
 
 ```
-from telenvi import raster_tools
+from telenvi import raster_tools as rt
 ```  
 
 #### open a raster, mono or multi-spectral
@@ -37,7 +37,7 @@ target = raster_tools.openGeoRaster(
 
 #### pixel-values extraction
 ```
-array = target.pxlV
+array = target.pxData
 ```
 
 #### export a raster
@@ -45,6 +45,8 @@ array = target.pxlV
 tarrget.exportAsRasterFile("pathToANewGeoTiff.tif")
 ```
 
+#### resample a raster at the opening
+#### resample a raster with the resolution and the extent of an other
 
 You can download a tutorial to learn how to use the telenvi package here :
 https://mega.nz/file/voNTUYrR#WHtp_stDGi-p3_TfUj9K_K76H56n0B1L0hGixMvVzkY
