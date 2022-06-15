@@ -2,7 +2,7 @@
 Functions to work with osgeo.gdal.Dataset objects.
 Here you find some functions to work directyl on this kind of objects.
 And you find a class called GeoIm. Each instance of this class integrate a osgeo.gdal.Dataset
-and an array. The methods of GeoIm are more simple than gdal.Dataset methods. x
+and an array. The methods of GeoIm are more simple than gdal.Dataset methods.
 """
 
 # Third-Party libraries
