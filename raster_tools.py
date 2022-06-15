@@ -1,417 +1,435 @@
-#%% Standard librairies
-import os
+"""
+Functions to work with osgeo.gdal.Dataset objects.
+Here you find some functions to work directyl on this kind of objects.
+And you find a class called GeoIm. Each instance of this class integrate a osgeo.gdal.Dataset
+and an array. The methods of GeoIm are more simple than gdal.Dataset methods.
+"""
+
+# Third-Party libraries
+import numpy as np
+from osgeo import gdal, gdalconst, osr, ogr
+from matplotlib import pyplot as plt
+from PIL import Image, ImageEnhance
+import geopandas as gpd
+import shapely
 import re
 
-# Third-Party librairies
-import numpy as np
-import geopandas as gpd
-from osgeo import gdal, gdalconst, ogr, osr
-from matplotlib import pyplot as plt
+# Standard librairies
+import os
 
 class GeoIm:
 
     """
-    Describe a georeferenced raster.
-    
+    Describe a georeferenced image. A pixel represent a part of the space.
+    Each pixel represent same size space-unit.
+
     attributes
     ----------
-        pxlV (np.ndarray) : an array representing the pixels values
-        geoData (tuple) : a tuple like
-            (
-                pixel_width, 
-                pixel_height,
-                originX,
-                originY
-            )
-        crs : a big string representing the coordinates reference system
+
+        name  | type       | short description
+        ---------------------------------------------------------------------------------
+        array | np.ndarray |  each pixel is charachterized by one or many values. 
+                              Here, they're stored in an object called array or matrix. 
+                              
+                              This array have 2 dimensions (x,y) if the image 
+                              represented is monospectral (only one channel),
+                              and in this case, each pixel is just one numerical value.
+
+                              But the array can have 3 dimensions (channel, x, y) 
+                              if the image is multispectral. 
+
+                              This mean the image was acquired with many shortwaves 
+                              length, and this is how we build some color images 
+                              with a red, a blue and a green channel, for example.
+        
+        ----------------------------------------------------------------------------------
+        ds    | gdal.Dataset| Contain all the geo-attributes of the image : the dimensions 
+                              of the space unit represented by his pixels (wrongly commonly 
+                              called "spatial resolution"), the coordinates of his origin
+                              point, the name of the Coordinates System Reference in which
+                              are wrote this coordinates... 
+        ----------------------------------------------------------------------------------
+        ds_encoding | gdalconst | the instance's osgeo.gdal.Dataset format
+        ar_encoding | np.ndtype | the instance's array numeric format
+
+
+    methods
+    -------
+        The methods of GeoIm objects can be split in 3 parts. 
+
+        Part 1 : the getters
+            This kind of methods will help you to get all the lovely geo-data, contained 
+            in the osgeo.gdal.Dataset of each GeoIm instance, because use directly this 
+            Dataset can sometimes be not very easy or natural. All this functions-names
+            start by "get" like "getPixelSize()" or "getGeomExtent()". Except the function
+            to get the number of bands, the height and the width of an image, because this
+            one is called "shape" to looks like the .shape attribute of a numpy.ndarray.
+
+             name               | arguments             | short description
+            ------------------------------------------------------------------------------------------------------------------
+             getOriginPoint     |                       | send a tuple : (originX, originY) 
+                                |                       | this coordinates are wrote in the 
+                                |                       | Coordinates Reference System 
+                                |                       | of the image
+
+             getPixelSize       |                       | send a tuple : (resX, resY)
+                                |                       |  or (pixelSizeX, pixelSizeY)
+
+             getCoordsExtent    |                       | send a tuple : 
+                                |                       | (xMin, yMin, xMax, yMax)
+
+             getGeomExtent      | mode : str            | send a geometry. If the mode is "ogr", 
+                                | default = "ogr"       | it's osgeo.ogr.geometry object. If 
+                                |                       | the mode is "shapely", it send a 
+                                |                       | shapely.geometry.Polygon. 
+
+             shape              |                       | send a tuple : 
+                                |                       | (numberOfBands, 
+                                |                       |  numberOfRows, 
+                                |                       |  numberOfCols)
+
+             copy               |                       | send a new GeoIm instance, 
+                                |                       | which is a copy of this from where 
+                                |                       | the method is called
+
+        Part 2 : the setters
+            This kind of methods will help you to manipulate your GeoIm instances: You can
+            change the size-space unit of the pixels of an image, the SCR, the origin point...
+
+             name               | arguments             | short description
+            ------------------------------------------------------------------------------------------------------------------
+             setOriginPoint     |                       | offsetX is added to the origin X of the GeoIm.
+                                | offsetX : float       | offsetY is added to the origin Y of the GeoIm.
+                                | offsetY : float       | if inplace, change the originPoint of the instance.
+                                | inplace : bool        | It can be used to literally move the image in space.
+                                |   default = True      | if not inplace, send a new geoim
+                                |                       | with the new origin.
+                                
+             cropFromVector     | vector : str          | vector can be a path to a shapefile.
+                                |   or shapely.geometry | In this case, the argument polygon
+                                | polygon : int         | is used to extract only one polygon
+                                |   default = 0         | of this shapefile. This polygon is
+                                |                       | next converted in shapely.geometry.
+                                |                       | Polygon. Or, vector can be directly
+                                |                       | a shapely geometry Polygon.
+            
+            cropFromRaster      |master_ds : str        | master_ds mean the dataset on which
+                                |  or osgeo.gdal.Dataset| the input GeoIm is cropped. It 
+                                |                       | either a path to raster, or dir
+                                |                       | an osgeo.gdal.Dataset object. 
+
+            cropFromIndex       |index : tuple          | index indicate the part of the array
+                                |(col1,row1,col2,row2)  | the user want to select.
+
+            resize              | xRes : float or int   | modify the size of the space-unit
+                                |   the new pixel size  | represented by each pixel of the 
+                                |   along the X axe     | GeoIm instance's. 
+                                | yRes : float or int   | 
+                                | method : str          |
+                                |   the resampling algo |
+                                |       "near"          |
+                                |       "bilinear"      |
+                                |       "cubic"         |
+                                |       "cubicspline"   |
+                                |       "lanczos"       |
+                                |       "average"       |
+                                |       "rms"           |
+                                |       "max"           |
+                                |       "min"           |
+                                |       "med"           |
+                                |       "q1"            |
+                                |       "q3"            |
+                                |       "sum"           |
+
+            stack               | ls_geoims             | make a geoim with multiple channels.
+                                |                       | each geoim in the ls_geoims must have
+                                |                       | precisely the same number of rows and
+                                |                       | columns. 
+
+            save                | outpath : str         | write the geoim into a raster file.
+                                | driverName:file format|
+                                |   default = "GTiff"   |
+
     """
 
-    def __init__(self, pxlV, geoData, crs):
-        self.pxlV = pxlV
-        self.geoData = geoData
-        self.crs = crs
+    def __init__(self, GDALdataset, ds_encoding = gdalconst.GDT_Float32, array_encoding = np.float32):
+        self.array_encoding = array_encoding
+        self.ds_encoding = ds_encoding
+        self.ds = GDALdataset
+        self.array = self.ds.ReadAsArray().astype(array_encoding)
 
-    def __add__(self, neighboor):
-        res = self.pxlV + neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
-        return x
-    
-    def __sub__(self, neighboor):
-        res = self.pxlV - neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
-        return x
+    def _updateArray(self):
+        """
+        Update instance's array from his dataset
+        """
+        self.array = self.ds.ReadAsArray().astype(self.array_encoding)
 
-    def __mul__(self, neighboor):
-        res = self.pxlV * neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
-        return x
+    def _updateDs(self, geodata = None):
+        """
+        Update instance's dataset from his array
+        """
 
-    def __truediv__(self, neighboor):
-        res = self.pxlV / neighboor.pxlV
-        x = GeoIm(res, self.geoData, self.crs)
-        return x
+        # Get geographic informations
+        if geodata == None:
+            xRes, yRes = self.getPixelSize()
+            orX, orY = self.getOriginPoint()
+            crs = self.ds.GetProjection()
+        else:
+            orX, xRes, orY, yRes, crs = geodata
+
+        # Get array dimensions
+        nBands, nRows, nCols = self.shape()
+
+        # Make a new memory dataset
+        newds = makeDs(
+            "",
+            self.array,
+            orX,
+            xRes,
+            orY,
+            yRes,
+            crs,
+            "MEM",
+            self.ds_encoding)
+
+        # Update instance dataset
+        self.ds = newds
 
     def __repr__(self):
         self.quickVisual()
         return ""
 
+    def __getitem__(self, index):
+        print(type(index))
+        return self.array[index]
+
+    def copy(self):
+        return GeoIm(self.ds)
+
+    def shape(self):
+        return getBandsRowsColsFromArray(self.array)
+
+    def getOriginPoint(self):
+        return getOriginPoint(self.ds)
+
+    def getPixelSize(self):
+        return getPixelSize(self.ds)
+
+    def getGeomExtent(self, mode="OGR"):
+        return getGeomExtent(self.ds)
+
     def getCoordsExtent(self):
-        """
-        :return:
-        --------
-            bounding-box coordinates of the GeoIm's spatial extent
-        """
+        return getCoordsExtent(self.ds)
 
-        dim = len(self.pxlV.shape)
+    def setOriginPoint(self, offsetX, offsetY, inplace=True):
+        """
+        Move the raster by offsetX coordinates system reference unity, same for offsetY
+        """
+        shiftedDs = setOriginPoint(self.ds, offsetX, offsetY, self.ds_encoding, self.array_encoding)
+        if inplace:
+            self.ds = shiftedDs
+            self._updateArray()
+        else:    
+            return GeoIm(shiftedDs)
 
-        # Compute extent coordinates
-        pixW, pixH, xLeft, yTop = self.geoData
+    def cropFromVector(self, vector, polygon=0, inplace=True):
+        crop_ds = cropDsFromVector(self.ds, vector, ar_encoding=self.array_encoding, ds_encoding=self.ds_encoding, polygon=polygon)
+        if inplace:
+            self.ds = crop_ds
+            self._updateArray()
+        else:    
+            return GeoIm(crop_ds)
         
-        if dim == 2:
-            rows, cols = self.pxlV.shape
+    def cropFromRaster(self, master_ds, inplace=True):
+        crop_ds = cropDsFromRaster(self.ds, master_ds)
+        if inplace:
+            self.ds = crop_ds
+            self._updateArray()
+        else:
+            return GeoIm(crop_ds)        
 
-        elif dim == 3:
-            _, rows, cols = self.pxlV.shape
-        xRight = xLeft+cols*pixW
-        yBottom = yTop+rows*pixH
+    def cropFromIndex(self, index, inplace=True):
 
-        return (xLeft, yTop, xRight, yBottom)
+        if inplace: 
+            target = self
+        else:
+            target = self.copy()
 
-    def getGeomExtent(self):
+        col1, row1, col2, row2 = index
+
+        # Crop the array
+        nBands = target.shape()[0]
+        if nBands == 1:
+            target.array = target.array[row1:row2, col1:col2]
+        else:
+            target.array = target.array[0:nBands, row1:row2, col1:col2]
+
+        # Get Metadata
+        xRes, yRes = target.getPixelSize()
+        old_orX, old_orY = target.getOriginPoint()
+
+        # Compute new origin point
+        new_orX = old_orX + (col1 * xRes)
+        new_orY = old_orY + (row1 * yRes)
+
+        # Update the dataset's instance
+        target._updateDs((new_orX, xRes, new_orY, yRes, target.ds.GetProjection()))
+
+        if not inplace: return target
+
+    def resize(self, xRes, yRes, method="near", inplace=True):
+        res_ds = resizeDs(self.ds, xRes, yRes, method)
+        if inplace: 
+            self.ds = res_ds
+            self._updateArray()
+        else:
+            return res_ds
+
+    def stack(self, ls_geoim, inplace=True):
+
+        if inplace:
+            target = self.copy()
+        else:
+            target = self
+
+        ls_ar = [self.array] + [geoim.array for geoim in ls_geoim]
+        stack_ar = np.array(ls_ar)
+        target.array = stack_ar
+        target._updateDs()
+
+        return target
+
+    def save(self, outpath, driverName="GTiff"):
         """
-        :return:
-        --------
-            a ogr.Geometry object which represent the spatial extent of the GeoIm
+        Create a raster file from the instance
         """
 
-        # Get bounding box coordinates
-        xLeft, yTop, xRight, yBottom = self.getCoordsExtent()
+        # Get dimensions
+        nBands, nRows, nCols = self.shape()
 
-        # Create a ring
-        ring = ogr.Geometry(ogr.wkbLinearRing)
-        ring.AddPoint(xLeft, yTop)
-        ring.AddPoint(xLeft, yBottom)
-        ring.AddPoint(xRight, yBottom)
-        ring.AddPoint(xRight, yTop)
-        ring.AddPoint(xLeft, yTop)
+        # Get geographic informations
+        xRes, yRes = self.getPixelSize()
+        orX, orY = self.getOriginPoint()
+        crs = self.ds.GetProjection()
 
-        # Assign this ring to a polygon
-        polygon_env = ogr.Geometry(ogr.wkbPolygon)
-        polygon_env.AddGeometry(ring)
+        # Create a new dataset
+        outds = makeDs(
+            outpath,
+            self.array,
+            orX,
+            xRes,
+            orY,
+            yRes,
+            crs,
+            driverName,
+            self.ds_encoding)
 
-        return polygon_env
+        # Write on the disk
+        outds.FlushCache()
 
-    def exportAsRasterFile(
-        self,
-        outP,
-        format = gdalconst.GDT_Float32,
-        driverName = "GTiff"):
+    def quickVisual(self, index = None, band = 0, colors = "viridis"):
 
-        """
-        Export a GeoIm object into a raster file georeferenced.
+        # Compute nCols and nRows
+        nBands, nRows, nCols = self.shape()
+        if index == None:
+            a,b,c,d = 0, nRows-1, 0, nCols-1
+        else:
+            a,b,c,d = index
 
-        :param:
-        -------
-            outP (str) : the path where you want to save the raster
-            format (gdalconst) : the image format
-            driverName (str) : the extension of the raster file
-        """
-
-        driver = gdal.GetDriverByName(driverName)
-
-        # Check if the array is 2D or 3D
-        dim = len(self.pxlV.shape)
-
-        if dim == 2:
-            nb_bands = 1
-            rows, cols = self.pxlV.shape
-
-        elif dim == 3:
-            nb_bands, rows, cols = self.pxlV.shape
+        # Plot
+        if nBands > 1:
+            plt.imshow(self.array[band][a:b, c:d], cmap = colors)
 
         else:
-            raise ValueError("Array must be in 2 or 3 dimensions")
-
-        # gdal.Dataset creation
-        outDs = driver.Create(outP, cols, rows, nb_bands, format)
-        outDs.SetGeoTransform((self.geoData[2], self.geoData[0], 0.0, self.geoData[3], 0.0, self.geoData[1]))
-        outDs.SetProjection(self.crs)
-
-        # Export each band of the 3D array
-        if dim == 3:
-            for band in range(1, nb_bands+1):
-                outDs.GetRasterBand(band).WriteArray(self.pxlV[band-1])
-
-        # Export the unique band
-        else:
-            outDs.GetRasterBand(1).WriteArray(self.pxlV)
-
-        outDs.FlushCache()
-        print("\n" + os.path.basename(outP) + " OK")
-        return None
-
-    def quickVisual(self, band = 0, colors = "viridis"):
-        """
-        Show the pixels values of a GeoIm object.
-
-        :param:
-        -------
-            band (int) : if the array of pixels values represent a multispectral image, with 3 dimensions, you can choose the band than you want to show here.
-            colors (str) : a string describing the color-range you want to use to show the image
-        """
-
-        if len(self.pxlV.shape) == 2:
-            plt.imshow(self.pxlV, cmap = colors)
-
-        elif len(self.pxlV.shape) == 3:
-            plt.imshow(self.pxlV[band], cmap = colors)
+            plt.imshow(self.array[a:b, c:d], cmap = colors)
 
         plt.show()
         plt.close()
         return None
 
-def openGeoRaster(
-    targetP,
-    indexToLoad = None,
-    roi = None,
-    ft = 0,
-    crs = None,
+    def rgbVisual(self, colorMode=[0,1,2], resize_factor=1, brightness=1, show=False, path=None):
+
+        _, nRows, nCols = self.shape()
+
+        if len(self.array.shape) != 3:
+            raise AttributeError("You need a GeoIm in 3 dimensions to display a GeoIm in RGB")
+
+        if self.array.shape[0] < 3:
+            raise AttributeError("The GeoIm have only {} channel and we need 3 channels to display it in RGB")
+
+        # Convert array into RGB array
+
+        # Unpack the RGB components is separates arrays
+        r = self.array[colorMode[0]]
+        g = self.array[colorMode[1]]
+        b = self.array[colorMode[2]]
+
+        # data normalization between [0-1]
+        r_norm = (r - r[r!=0].min()) / (r.max() - r[r!=0].min()) * 255
+        g_norm = (g - g[g!=0].min()) / (g.max() - g[g!=0].min()) * 255
+        b_norm = (b - b[b!=0].min()) / (b.max() - b[b!=0].min()) * 255
+
+        # RGB conversion
+        # --------------
+
+        # Create a target array
+        rgb_ar = np.zeros((nRows, nCols, 3))
+
+        # For each cell of the "board"
+        for row in range(nRows):
+            for col in range(nCols):
+
+                # We get the separate RGB values in each band
+                r = r_norm[row][col]
+                g = g_norm[row][col]
+                b = b_norm[row][col]
+
+                # We get them together in little array
+                rgb_pixel = np.array([r,g,b])
+
+                # And we store this little array on the board position
+                rgb_ar[row][col] = rgb_pixel
+
+        rgb = Image.fromarray(np.uint8(rgb_ar))
+
+        # Adjust size
+        rgb = rgb.resize((nCols * resize_factor, nRows * resize_factor))
+
+        # Adjust brightness
+        enhancer = ImageEnhance.Brightness(rgb)
+        rgb = enhancer.enhance(brightness)
+
+        # Display
+        if show:
+            rgb.show()
+
+        # Save
+        if path != None:
+            rgb.save(path)
+
+        # Return PIL.Image instance
+        return rgb
+
+def openManyGeoRaster(
+    directory,
+    pattern,
+    endKeyPos,
+    crop = None,
+    pol = 0,
+    clip = None,
+    numBand = None,
+    epsg = None,
     res = None,
-    algo = "near",
-    numFormat = np.float32,
+    resMethod = "near",
+    ar_encoding = np.float32,
+    ds_encoding = gdalconst.GDT_Float32
     ):
 
-    """
-    Make a GeoIm object from a georeferenced raster file.
-
-    :param:
-    -------
-        targetP (str) : the path to the raster you want to load
-        indexToLoad (int or list) : if the file is a stack, give the band or the bands you want to load here
-        roi if (list) : a list of 2 tuples [(x,y),(x,y)] representing the top-left corner and bottom-right corner of a region of interest
-            if (str) : a path to a shapefile containing polygone(s) or a path to an other raster. The GeoIm will be clip onto the extent of this raster.
-        ft (int) : if roi is a path to a shapefile, ft give the index in the attribute table of the feature you want to use as ROI
-        crs (int) : EPSG of a desired Coordinates Reference System (for WGS84, it's 4326 for example)
-        res (int or float) : if you want to resample the image, you give the new resolution here. The unit of the value must be in the unit of the target crs.
-        algo (str) : the resample algorithm you want to use. Resample is computed with gdal.Warp(), so see the gdal api documentation to see the others available methods.
-        format (np.dtype) : the numeric format of the array values
-    
-    :return:
-    --------
-        a GeoIm object
-    """
-
-    # -------------------
-    # # Inputs checking #
-    # -------------------
-    
-    # check target validity
-    if not os.path.exists(targetP):
-        raise ValueError("error 1 : invalid target path")
-    
-    # Check format validity
-    # ...
-
-    # Check the bands extraction mode
-    BANDSMODE = 0
-    if indexToLoad != None:
-
-        if type(indexToLoad) == int:
-            BANDSMODE = 1
-
-        elif type(indexToLoad) == list:
-            for element in indexToLoad:
-                if type(element) != int:
-                    raise ValueError("error 2 : target_array index must be integer or list of integers")
-            BANDSMODE = 2
-        
-        else:
-            raise ValueError("error 2 : target_array index must be integer or list of integers")
-
-    # Check CROP mode
-    CROP = False
-    if roi != None:
-        if type(roi) == list:
-
-            if len(roi) != 2:
-                raise ValueError("error 3 : Coordinates of roi must be a list of 2 tuples")
-            
-            if len(roi[0]) != 2 or len(roi[1]) != 2:
-                raise ValueError("error 4 : roi tuples must have 2 numbers")
-
-            # Unpack crop coordinates
-            XMIN, YMAX = roi[0]
-            XMAX, YMIN = roi[1]
-
-            # Check coordinates logic validity
-            if XMIN >= XMAX or YMIN >= YMAX :
-                raise ValueError("error 5 : Coordinates are invalid")
-
-            # Crop mode activate
-            CROP = True
-
-        elif type(roi) == str:
-            match roi[-4:].lower():
-                case ".shp":
-
-                    # check ft input
-                    if ft == None:
-                        raise ValueError("error 6 : ft parameter is empty")
-
-                    # shapefile loading
-                    layer = gpd.read_file(roi)
-
-                    # Feature geometry extraction
-                    geom = layer["geometry"][ft].bounds
-                    XMIN, YMAX = geom[0], geom[3]
-                    XMAX, YMIN = geom[2], geom[1]
-
-                case _:
-                    try:
-                        # get spatial extent of the raster
-                        ds = gdal.Open(roi)
-                        XMIN, xPixSize, _, YMAX, _, yPixSize = ds.GetGeoTransform()
-                        XMAX = XMIN + (xPixSize * ds.RasterXSize)
-                        YMIN = YMAX + (yPixSize * ds.RasterYSize)
-                    
-                    except AttributeError:
-                        print("error 6.2 : invalid raster region of interest")
-
-            # Crop mode activate
-            CROP = True
-    
-    # Check reprojection mode
-    REPROJ = False
-    if crs != None:
-        if type(crs) != int:
-            raise ValueError("error 7 : The destination crs must be a number")
-        REPROJ = True
-        srs = osr.SpatialReference()
-        srs.ImportFromEPSG(crs)
-        crs = srs.ExportToWkt()
-
-    # Check resample mode
-    RESAMPLE = False
-    if res != None:
-        if type(res) != float and type(res) != int:
-            raise ValueError("error 8 : The resolution must be a number")
-        RESAMPLE = True
-    
-    # ----------------
-    # # Loading data #
-    # ----------------
-
-    inDs = gdal.Open(targetP)
-
-    if REPROJ: inDs = gdal.Warp("", inDs, format = "VRT", dstSRS = crs)
-
-    if RESAMPLE: inDs = gdal.Warp("", inDs, format = "VRT", xRes = res, yRes = res, resampleAlg = algo)
-
-    # Get geographic data from the dataset
-    geoTransform = inDs.GetGeoTransform() # Describe geographic area of the full image
-    projection = inDs.GetProjection() # The big string which describe the Coordinates Reference System
-
-    # Unpack geoTransform of the full image
-    orX = geoTransform[0]
-    orY = geoTransform[3]
-    widthPix = geoTransform[1]
-    heightPix = geoTransform[5]
-
-    if CROP:
-        # Transform geographic coordinates of the region of interest into matrix coordinates
-        row1 = int((YMAX-orY)/heightPix)
-        col1 = int((XMIN-orX)/widthPix)
-        row2 = int((YMIN-orY)/heightPix)
-        col2 = int((XMAX-orX)/widthPix)
-
-        # Update the origine's coordinates
-        orX = orX + (col1 * widthPix)
-        orY = orY + (row1 * heightPix)
-
-    else:
-        row1 = 0
-        col1 = 0
-        row2 = inDs.RasterYSize - 1
-        col2 = inDs.RasterXSize - 1
-
-    # get array(s) from the dataset
-    if BANDSMODE == 0:
-        pxlV = inDs.ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-
-    elif BANDSMODE == 1:
-        pxlV = inDs.GetRasterBand(indexToLoad).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-
-    elif BANDSMODE == 2:
-        band1 = inDs.GetRasterBand(indexToLoad[0]).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-        pxlV = np.array([band1])
-        for index in indexToLoad[1:]:
-            band = inDs.GetRasterBand(index).ReadAsArray(col1, row1, col2-col1+1, row2-row1+1).astype(numFormat)
-            pxlV = np.append(pxlV, [band], axis=0)
-
-    print(os.path.basename(targetP + " loaded"))
-
-    return GeoIm(pxlV, (widthPix, heightPix, orX, orY), projection)
-
-def openManyGeoRasters(
-    folder,
-    pattern,
-    endKeyPos = -4,
-    indexToLoad = None,
-    roi = None,
-    ft = 0,
-    crs = None,
-    res = None,
-    algo = "near",
-    format = np.float32):
-
-    """
-    Make a dictionnary containing GeoIm objects for all the raster files in the folder, with a part of their name matching with the pattern. You can build the keys of the dictionnary by setting the pattern and the endKeyPos.
-
-    :param:
-    -------
-        folder (str) : path to a directory containing many rasters
-        pattern (str) : a regular expression pattern use to detect rasters files you want to load
-        endKeyPos (int) : the position in the raster file name where you want to stop the key
-
-    :return:
-    --------
-        x (dictionnary) : a dictionnary with GeoIm objects inside
-
-    :example:
-    ---------
-        image_sentinel_20190118
-            |__ T32PMV_20190118T095331_B01.jp2
-            |__ T32PMV_20190118T095331_B01.jp2.xml
-            |__ T32PMV_20190118T095331_B02.jp2
-            |__ T32PMV_20190118T095331_B02.jp2.xml
-            |__ T32PMV_20190118T095331_B03.jp2
-            |__ T32PMV_20190118T095331_B04.jp2
-
-        params :
-        folder = image_sentinel_20190118
-        pattern = "B[0-9]+.jp2$" >>> It means "a 'B' followed by a serie of numbers ('[0-9]+'), then by a point, then by 'jp2', then it's the end of the filename '$'. use this pattern allow the programm to avoid the metadata files, which ended with .xml
-        endKeyPos = -4
-
-        return:
-            {"B02":GeoIm object with the data of T32PMV_20190118T095331_B02.jp2,
-             "B03":GeoIm object with the data of T32PMV_20190118T095331_B03.jp2,
-             "B04":GeoIm object with the data of T32PMV_20190118T095331_B04.jp2}
-    """
-
-    if pattern == None:
-        raise ValueError("error 2 : undefined pattern")
-
-    if type(pattern) != str:
-        raise ValueError("error 3 : pattern must be str")
-
-    if type(endKeyPos) != int:
-        raise ValueError("error 5 : end key position must be integer")
-    
     # Compile pattern with regular expression
     rpattern = re.compile(pattern.upper())
 
     x = {}
-    for fileName in sorted(os.listdir(folder)):
+    for fileName in sorted(os.listdir(directory)):
 
         try : # Get pattern start position in fileName
             startKeyPos = re.search(rpattern, fileName.upper()).span()[0]
@@ -419,56 +437,355 @@ def openManyGeoRasters(
         except AttributeError: # Pattern not find in fileName
             continue
         
-        fileBandName = os.path.join(folder, fileName)
+        fileBandName = os.path.join(directory, fileName)
         
         # Get the key corresponding to the pattern in the fileName
         bandId = fileName[startKeyPos:endKeyPos]
 
         # Extract and pack all the data in a lovely dictionnary with bandId as key
         x[bandId] = openGeoRaster(
-            fileBandName,
-            indexToLoad,
-            roi,
-            ft,
-            crs,
-            res,
-            algo,
-            format)
-        
-        print(bandId + " loaded")
+            rasterPath = fileBandName,
+            crop = crop,
+            pol = pol,
+            clip = clip,
+            epsg = epsg,
+            res = res,
+            numBand = numBand,
+            resMethod = resMethod,
+            ar_encoding = ar_encoding,
+            ds_encoding = ds_encoding)
 
     return x
 
-def stackGeoIm(list_GeoIm):
-    """
-    Make a stack from many GeoIm objects
+def openGeoRaster(
+    rasterPath,
+    crop = None,
+    pol = 0,
+    clip = None,
+    numBand = None,
+    epsg = None,
+    res = None,
+    resMethod = "near",
+    ar_encoding = np.float32,
+    ds_encoding = gdalconst.GDT_Float32,
+    verbose=True
+    ):
 
-    :params:
-    --------
-        list_GeoIm (list) : a list containing 2 or more GeoIm objects. They must have the same geoData and the same CRS.
+    # check target path validity
+    if not os.path.exists(rasterPath):
+        raise ValueError("error 1 : the path doesn't exist")
     
-    :returns:
-    ---------
-        a new GeoIm object with pxlV in 3 dimensions. The number of the bands is the same than the order of the GeoIm in list_GeoIm.
-    """
+    # Input dataset
+    inDs = gdal.Open(rasterPath)
+    if inDs == None:
+        raise ValueError("error 2 : the file is not a valid raster")
+
+    if clip != None:
+
+        # Open the clip as gdal dataset
+        master_ds = gdal.Open(clip)
+
+        # Get input and clip resolutions
+        master_resX,_ = getPixelSize(master_ds)
+        input_resX,_ = getPixelSize(inDs)
+
+        # If they're different, we order a resample by setting res argument
+        if master_resX != input_resX:
+            res = master_resX
+
+        # Order the reproject the input image into the SCR of the master image
+        epsg = master_ds.GetProjection()
+
+        # Then we set the crop argument to crop the input image on the extent of clip image
+        crop = clip
+
+    # Crop
+    if type(crop) == str:
+        if crop[-4:].lower() == ".shp":
+            inDs = cropDsFromVector(inDs, crop, polygon=pol)
+        elif gdal.Open(crop) != None:
+            inDs = cropDsFromRaster(inDs, crop)
     
-    # Inputs Checking
-    try :
-        std_geoData = list_GeoIm[0].geoData
-        std_crs = list_GeoIm[0].crs
+    elif type(crop) in [list, tuple]:
+        # xMin, yMin, xMax, yMax
+        inDs = cropDsFromIndex(inDs, crop)
 
-        for elt in list_GeoIm:
-            if std_geoData != elt.geoData or std_crs != elt.crs:
-                raise ValueError("All the GeoIm objects must have the same resolution, the same origin x and y and the same CRS")
+    # Reprojection
+    if epsg != None:
+        inDs = reprojDs(inDs, epsg)
+
+    # Resample
+    if res != None:
+        inDs = resizeDs(inDs, xRes=res, yRes=res, resMethod=resMethod)
     
-    except AttributeError:
-        print("error 13: stackGeoIm take a list of GeoIm objects")
+    # Extract interest band
+    if numBand != None:
+        inDs = chooseBandFromDs(inDs, numBand, ar_encoding, ds_encoding)
 
-    # Process
-    B1 = list_GeoIm[0].pxlV
-    stack = np.array([B1])
-    for elt in list_GeoIm[1:]:
-        stack = np.append(stack, [elt.pxlV], axis=0)
+    # Switch
+    if clip != None:
+        in_orX, in_orY = getOriginPoint(inDs) # After the resampling and the crop
+        ma_orX, ma_orY = getOriginPoint(master_ds)
+        gapX = in_orX - ma_orX
+        gapY = in_orY - ma_orY
+        inDs = setOriginPoint(inDs, gapX, gapY, ds_encoding, ar_encoding)
 
-    # Return    
-    return GeoIm(stack, std_geoData, std_crs)
+    geoim = GeoIm(inDs, ds_encoding, ar_encoding)
+    
+    if verbose: print(f"{os.path.basename(rasterPath)} loaded")
+    return geoim
+
+def makeDs(
+    path,
+    array,
+    orX,
+    xRes,
+    orY,
+    yRes,
+    crs,
+    driverName = "MEM",
+    ds_encoding = gdalconst.GDT_Float32):
+
+    nBands, nRows, nCols = getBandsRowsColsFromArray(array)
+
+    # Dataset metadata
+    newds_driver = gdal.GetDriverByName(driverName)
+    newds = newds_driver.Create(path, nCols, nRows, nBands, ds_encoding)
+
+    # Dataset geodata setup
+    newds.SetGeoTransform((orX, xRes, 0.0, orY, 0.0, yRes))
+    newds.SetProjection(crs)
+
+    # Load data into the dataset
+    if nBands > 1:
+        for band in range(1, nBands+1):
+            newds.GetRasterBand(band).WriteArray(array[band-1])
+    else:
+        newds.GetRasterBand(1).WriteArray(array)
+
+    return newds
+
+def getOriginPoint(ds):
+    return (ds.GetGeoTransform()[0], ds.GetGeoTransform()[3])
+
+def getPixelSize(ds):
+    return (ds.GetGeoTransform()[1], ds.GetGeoTransform()[5])
+
+def getCoordsExtent(ds):
+    nRows, nCols = ds.RasterYSize, ds.RasterXSize
+    xMin, yMax = getOriginPoint(ds)
+    xRes, yRes = getPixelSize(ds)
+    xMax = xMin + xRes * nCols
+    yMin = yMax + yRes * nRows
+    return xMin, yMin, xMax, yMax
+
+def getGeomExtent(ds = None, coords = None, mode="OGR"):
+
+    # Extract instance extent coordinates
+    if ds != None:
+        xMin, yMin, xMax, yMax = getCoordsExtent(ds)
+    
+    if coords != None:
+        xMin, yMin, xMax, yMax = coords
+
+    # Compute OGR geometry
+    if mode.upper() == "OGR":
+
+        # Create a ring
+        ring = ogr.Geometry(ogr.wkbLinearRing)
+        ring.AddPoint(xMin, yMax)
+        ring.AddPoint(xMin, yMin)
+        ring.AddPoint(xMax, yMin)
+        ring.AddPoint(xMax, yMax)
+        ring.AddPoint(xMin, yMax)
+
+        # Assign this ring to a polygon
+        polygon_env = ogr.Geometry(ogr.wkbPolygon)
+        polygon_env.AddGeometry(ring)
+
+    # Compute Shapely geometry
+    elif mode.upper() == "SHAPELY":
+        polygon_env = shapely.geometry.Polygon(
+            [(xMin, yMax),
+             (xMin, yMin),
+             (xMax, yMin),
+             (xMax, yMax),
+             (xMin, yMax)])
+
+    return polygon_env
+
+def getBandsRowsColsFromDs(ds):
+    nBands = 0
+    while ds.GetRasterBand(nBands+1) != None:
+        nBands += 1
+    nRows = ds.RasterYSize
+    nCols = ds.RasterXSize
+    return nBands, nRows, nCols
+
+def getBandsRowsColsFromArray(array):
+    ar_dims = len(array.shape)
+    if ar_dims == 2:
+        nBands, nRows, nCols = (1,) + array.shape
+    elif ar_dims == 3:
+        nBands, nRows, nCols = array.shape
+    else:
+        print("Array have more than 3 dimensions")
+        return None
+    return nBands, nRows, nCols
+
+def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
+
+    # Get initial image resolution
+    xRes, yRes = getPixelSize(ds)
+
+    # Get initial image extent
+    A = getGeomExtent(ds = ds, mode = "SHAPELY")
+    AxMin = A.bounds[0]
+    AyMax = A.bounds[3]
+
+    # Get argument extent
+    B = getGeomExtent(coords = (BxMin, ByMin, BxMax, ByMax), mode = "SHAPELY")
+
+    # Get intersection extent
+    C = A.intersection(B)
+    CxMin, CyMin, CxMax, CyMax = C.bounds
+
+    # Transform geographic to matrixian coordinates
+    # distance between the top edge of A and the top edge of C = CyMax - AyMax
+    # to find the row of the input image integrating the C line
+    # number_of_pixels_between_A_top_edge_and_C_top_edge = dist_between_A_top_edge_and_C_top_edge / yRes
+
+    row1 = int((CyMax - AyMax) / yRes)
+    col1 = int((CxMin - AxMin) / xRes)
+    row2 = int((CyMin - AyMax) / yRes)
+    col2 = int((CxMax - AxMin) / xRes)
+
+    return row1, col1, row2, col2
+
+def cropDsFromVector(ds, vector, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, polygon=0):
+
+    # If vector argument is a path to a shapefile,
+    # here we extract only one polygon of this shapefile
+    if type(vector) == str:
+        layer = gpd.read_file(vector)
+        vector = layer["geometry"][polygon]
+
+    # Extract Coordinates extent
+    xMin, yMin, xMax, yMax = vector.bounds
+    row1, col1, row2, col2 = getDsArrayIndexesFromSpatialExtent(ds, xMin, yMin, xMax, yMax)
+
+    # Crop the array
+    custom_array = ds.ReadAsArray(col1, row1, col2-col1, row2-row1).astype(ar_encoding)
+    custom_orX = xMin
+    custom_orY = yMax
+    nBands, nRows, nCols = getBandsRowsColsFromArray(custom_array)
+    xRes, yRes = getPixelSize(ds)
+    crs = ds.GetProjection()
+
+    # Create a new dataset with the array cropped
+    return makeDs("", custom_array, custom_orX, xRes, custom_orY, yRes, crs, "MEM", ds_encoding)
+
+def cropDsFromRaster(slave_ds, master_ds):
+    if type(slave_ds) == str:
+        slave_ds = gdal.Open(slave_ds)
+    if type(master_ds) == str:
+        master_ds = gdal.Open(master_ds)
+
+    # Extract geometries
+    slave_extent = getGeomExtent(slave_ds, mode="shapely")
+    master_extent = getGeomExtent(master_ds, mode="shapely")
+
+    # Intersect themselves
+    inter_extent = slave_extent.intersection(master_extent)
+
+    # Get data on the intersection area
+    return cropDsFromVector(slave_ds, inter_extent)
+
+def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
+    col1, row1, col2, row2 = index
+    ls_stack = []
+    num_band = 0
+    while ds.GetRasterBand(num_band+1) != None:
+        num_band += 1
+    if num_band > 1:
+        for band in range(0,num_band):
+            ar_band = ds.GetRasterBand(num_band)
+            ar_custom = ar_band.ReadAsArray(col1, row1, col2-col1, row2-row1).astype(ar_encoding)
+            ls_stack.append(ar_custom)
+        im_array = np.array(ls_stack)
+    else:
+        im_array = ds.GetRasterBand(1).ReadAsArray(col1, row1, col2-col1, row2-row1).astype(ar_encoding)
+
+    # Get input dataset metadata
+    xRes, yRes = getPixelSize(ds)
+    old_orX, old_orY = getOriginPoint(ds)
+
+    # Compute new origin point
+    new_orX = old_orX + (col1 * xRes)
+    new_orY = old_orY + (row1 * yRes)
+
+    # Update the dataset's instance
+    newDs = makeDs(
+        "",
+        im_array,
+        new_orX,
+        xRes,
+        new_orY,
+        yRes,
+        ds.GetProjection(),
+        "MEM",
+        ds_encoding)
+
+    return newDs
+
+def resizeDs(ds, xRes, yRes, resMethod="near"):
+
+    ds_resized = gdal.Warp(
+        destNameOrDestDS="",
+        srcDSOrSrcDSTab = ds,
+        format = "VRT",
+        xRes = xRes,
+        yRes = yRes,
+        resampleAlg = resMethod)
+    
+    return ds_resized
+
+def reprojDs(ds, epsg):
+    if type(epsg) == int:
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(epsg)
+        crs = srs.ExportToWkt()
+    else:
+        crs = epsg
+    return gdal.Warp("", ds, format = "VRT", dstSRS = crs)
+
+def chooseBandFromDs(ds, index, ar_encoding=np.float32, ds_encoding=gdalconst.GDT_Float32):
+    orX, orY = getOriginPoint(ds)
+    nBands, nRows, nCols = getBandsRowsColsFromDs(ds)
+    xRes, yRes = getPixelSize(ds)
+    crs = ds.GetProjection()
+    array = ds.GetRasterBand(index).ReadAsArray(ar_encoding)
+    return makeDs("", array, orX, xRes, orY, yRes, crs, "MEM", ds_encoding)
+
+def setOriginPoint(ds, offsetX, offsetY, ds_encoding, ar_encoding):
+
+    # Get metadata
+    xRes, yRes = getPixelSize(ds)
+    orX, orY = getOriginPoint(ds)
+
+    # shift
+    ds.SetGeoTransform((orX + offsetX, xRes, 0.0, orY + offsetY, 0.0, yRes))
+
+    return ds
+
+def stackGeoIms(geoims):
+    return geoims[0].stack(geoims[1:], inplace=False)
+
+def stackMonoDs(ls_ds, ar_encoding=np.float32):
+    stack_ds = ls_ds[0]
+    i = 0
+    for ds in ls_ds[1:]:
+        i+=1
+        print(f"{i}/{len(ls_ds)}")
+        stack_ds.GetRasterBand(1).WriteArray(ds.ReadAsArray().astype(ar_encoding))
+    return stack_ds
