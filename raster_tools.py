@@ -1,6 +1,6 @@
 """
 Functions to work with osgeo.gdal.Dataset objects.
-Here you find some functions to work directyl on this kind of objects.
+Here you find some functions to work directly on this kind of objects.
 And you find a class called GeoIm. Each instance of this class integrate a osgeo.gdal.Dataset
 and an array. The methods of GeoIm are more simple than gdal.Dataset methods.
 """
@@ -299,6 +299,15 @@ class GeoIm:
 
         return target
 
+    def merge(self, ls_geoim, inplace=True):
+        ls_ds = [self.ds] + [geoim.ds for geoim in ls_geoim]
+        merged_ds = mergeDs(ls_ds)
+        if inplace:
+            self.ds = merged_ds
+            self._updateArray()
+        else:
+            return GeoIm(merged_ds)
+
     def save(self, outpath, driverName="GTiff"):
         """
         Create a raster file from the instance
@@ -332,16 +341,16 @@ class GeoIm:
         # Compute nCols and nRows
         nBands, nRows, nCols = self.shape()
         if index == None:
-            a,b,c,d = 0, nRows-1, 0, nCols-1
+            col1, row1, col2, row2 = 0, 0, nRows-1, nCols-1
         else:
-            a,b,c,d = index
+            col1, row1, col2, row2 = index
 
         # Plot
         if nBands > 1:
-            plt.imshow(self.array[band][a:b, c:d], cmap = colors)
+            plt.imshow(self.array[band][row1:row2, col1:col2], cmap = colors)
 
         else:
-            plt.imshow(self.array[a:b, c:d], cmap = colors)
+            plt.imshow(self.array[row1:row2, col1:col2], cmap = colors)
 
         plt.show()
         plt.close()
@@ -761,7 +770,6 @@ def reprojDs(ds, epsg):
 
 def chooseBandFromDs(ds, index, ar_encoding=np.float32, ds_encoding=gdalconst.GDT_Float32):
     orX, orY = getOriginPoint(ds)
-    nBands, nRows, nCols = getBandsRowsColsFromDs(ds)
     xRes, yRes = getPixelSize(ds)
     crs = ds.GetProjection()
     array = ds.GetRasterBand(index).ReadAsArray(ar_encoding)
@@ -778,10 +786,7 @@ def setOriginPoint(ds, offsetX, offsetY, ds_encoding, ar_encoding):
 
     return ds
 
-def stackGeoIms(geoims):
-    return geoims[0].stack(geoims[1:], inplace=False)
-
-def stackMonoDs(ls_ds, ar_encoding=np.float32):
+def stackDs(ls_ds, ar_encoding=np.float32):
     stack_ds = ls_ds[0]
     i = 0
     for ds in ls_ds[1:]:
@@ -789,3 +794,20 @@ def stackMonoDs(ls_ds, ar_encoding=np.float32):
         print(f"{i}/{len(ls_ds)}")
         stack_ds.GetRasterBand(1).WriteArray(ds.ReadAsArray().astype(ar_encoding))
     return stack_ds
+
+def stackGeoIms(geoims):
+    return geoims[0].stack(geoims[1:], inplace=False)
+
+def mergeDs(ls_ds, proj = None):
+    if proj == None:
+        proj = ls_ds[0].GetProjection()
+    
+    merged_ds = gdal.Warp(
+        destNameOrDestDS = "",
+        srcDSOrSrcDSTab = ls_ds,
+        format="MEM")
+
+    return merged_ds
+
+def mergeGeoIms(geoims):
+    return geoims[0].merge(geoims[1:], inplace=False)
