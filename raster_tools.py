@@ -419,6 +419,19 @@ class GeoIm:
         # Return PIL.Image instance
         return rgb
 
+    def makeMosaic(self, nbSquaresByAx=2):
+        cells_nRows, cells_nCols = [int(n/nbSquaresByAx) for n in self.shape()[1:]]
+        mosaic = []
+        for row in range(nbSquaresByAx):
+            for col in range(nbSquaresByAx):
+                row1 = cells_nRows * row
+                col1 = cells_nCols * col
+                row2 = row1 + cells_nRows
+                col2 = col1 + cells_nCols
+                mosaic.append(self.cropFromIndex((row1, col1, row2, col2), inplace=False))
+
+        return mosaic
+
 def openManyGeoRaster(
     directory,
     pattern,
