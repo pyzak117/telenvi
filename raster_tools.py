@@ -13,7 +13,7 @@ from PIL import Image, ImageEnhance
 import geopandas as gpd
 import shapely
 import re
-    
+
 # Standard librairies
 import os
 
@@ -61,24 +61,24 @@ class GeoIm:
             This kind of methods will help you to get all the lovely geo-data, contained 
             in the osgeo.gdal.Dataset of each GeoIm instance, because use directly this 
             Dataset can sometimes be not very easy or natural. All this functions-names
-            start by "get" like "getPixelSize()" or "getGeomExtent()". Except the function
+            start by "get" like "getDsPixelSize()" or "getDsOrIndexGeomExtent()". Except the function
             to get the number of bands, the height and the width of an image, because this
             one is called "shape" to looks like the .shape attribute of a numpy.ndarray.
 
              name               | arguments             | short description
             --------------------------------------------------------------------------------------------
-             getOriginPoint     |                       | send a tuple : (originX, originY) 
+             getDsOriginPoint     |                       | send a tuple : (originX, originY) 
                                 |                       | this coordinates are wrote in the 
                                 |                       | Coordinates Reference System 
                                 |                       | of the image
             --------------------------------------------------------------------------------------------
-             getPixelSize       |                       | send a tuple : (resX, resY)
+             getDsPixelSize       |                       | send a tuple : (resX, resY)
                                 |                       |  or (pixelSizeX, pixelSizeY)
             --------------------------------------------------------------------------------------------
-             getCoordsExtent    |                       | send a tuple : 
+             getDsCoordsExtent    |                       | send a tuple : 
                                 |                       | (xMin, yMin, xMax, yMax)
             --------------------------------------------------------------------------------------------
-             getGeomExtent      | mode : str            | send a geometry. If the mode is "ogr", 
+             getDsOrIndexGeomExtent      | mode : str            | send a geometry. If the mode is "ogr", 
                                 | default = "ogr"       | it's osgeo.ogr.geometry object. If 
                                 |                       | the mode is "shapely", it send a 
                                 |                       | shapely.geometry.Polygon. 
@@ -183,8 +183,8 @@ class GeoIm:
 
         # Get geographic informations
         if geodata == None:
-            xRes, yRes = self.getPixelSize()
-            orX, orY = self.getOriginPoint()
+            xRes, yRes = self.getDsPixelSize()
+            orX, orY = self.getDsOriginPoint()
             crs = self.ds.GetProjection()
         else:
             orX, xRes, orY, yRes, crs = geodata
@@ -221,17 +221,17 @@ class GeoIm:
     def shape(self):
         return getBandsRowsColsFromArray(self.array)
 
-    def getOriginPoint(self):
-        return getOriginPoint(self.ds)
+    def getDsOriginPoint(self):
+        return getDsOriginPoint(self.ds)
 
-    def getPixelSize(self):
-        return getPixelSize(self.ds)
+    def getDsPixelSize(self):
+        return getDsPixelSize(self.ds)
 
-    def getGeomExtent(self, mode="OGR"):
-        return getGeomExtent(self.ds)
+    def getDsOrIndexGeomExtent(self, mode="OGR"):
+        return getDsOrIndexGeomExtent(self.ds)
 
-    def getCoordsExtent(self):
-        return getCoordsExtent(self.ds)
+    def getDsCoordsExtent(self):
+        return getDsCoordsExtent(self.ds)
 
     def setOriginPoint(self, offsetX, offsetY, inplace=True):
         """
@@ -277,8 +277,8 @@ class GeoIm:
             target.array = target.array[0:nBands, row1:row2, col1:col2]
 
         # Get Metadata
-        xRes, yRes = target.getPixelSize()
-        old_orX, old_orY = target.getOriginPoint()
+        xRes, yRes = target.getDsPixelSize()
+        old_orX, old_orY = target.getDsOriginPoint()
 
         # Compute new origin point
         new_orX = old_orX + (col1 * xRes)
@@ -329,8 +329,8 @@ class GeoIm:
         nBands, nRows, nCols = self.shape()
 
         # Get geographic informations
-        xRes, yRes = self.getPixelSize()
-        orX, orY = self.getOriginPoint()
+        xRes, yRes = self.getDsPixelSize()
+        orX, orY = self.getDsOriginPoint()
         crs = self.ds.GetProjection()
 
         # Create a new dataset
@@ -456,7 +456,9 @@ def openManyGeoRaster(
     res = None,
     resMethod = "near",
     ar_encoding = np.float32,
-    ds_encoding = gdalconst.GDT_Float32
+    ds_encoding = gdalconst.GDT_Float32,
+    *args,
+    **kargs
     ):
 
     # Compile pattern with regular expression
@@ -502,7 +504,9 @@ def openGeoRaster(
     resMethod = "near",
     ar_encoding = np.float32,
     ds_encoding = gdalconst.GDT_Float32,
-    verbose=True
+    verbose=True,
+    *args,
+    **kargs
     ):
 
     # check target path validity
@@ -520,8 +524,8 @@ def openGeoRaster(
         master_ds = gdal.Open(clip)
 
         # Get input and clip resolutions
-        master_resX,_ = getPixelSize(master_ds)
-        input_resX,_ = getPixelSize(inDs)
+        master_resX,_ = getDsPixelSize(master_ds)
+        input_resX,_ = getDsPixelSize(inDs)
 
         # If they're different, we order a resample by setting res argument
         if master_resX != input_resX:
@@ -558,8 +562,8 @@ def openGeoRaster(
 
     # Switch
     if clip != None:
-        in_orX, in_orY = getOriginPoint(inDs) # After the resampling and the crop
-        ma_orX, ma_orY = getOriginPoint(master_ds)
+        in_orX, in_orY = getDsOriginPoint(inDs) # After the resampling and the crop
+        ma_orX, ma_orY = getDsOriginPoint(master_ds)
         gapX = in_orX - ma_orX
         gapY = in_orY - ma_orY
         inDs = setOriginPoint(inDs, gapX, gapY, ds_encoding, ar_encoding)
@@ -599,25 +603,33 @@ def makeDs(
 
     return newds
 
-def getOriginPoint(ds):
+def getDsOriginPoint(ds):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
     return (ds.GetGeoTransform()[0], ds.GetGeoTransform()[3])
 
-def getPixelSize(ds):
+def getDsPixelSize(ds):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
     return (ds.GetGeoTransform()[1], ds.GetGeoTransform()[5])
 
-def getCoordsExtent(ds):
+def getDsCoordsExtent(ds):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
     nRows, nCols = ds.RasterYSize, ds.RasterXSize
-    xMin, yMax = getOriginPoint(ds)
-    xRes, yRes = getPixelSize(ds)
+    xMin, yMax = getDsOriginPoint(ds)
+    xRes, yRes = getDsPixelSize(ds)
     xMax = xMin + xRes * nCols
     yMin = yMax + yRes * nRows
     return xMin, yMin, xMax, yMax
 
-def getGeomExtent(ds = None, coords = None, mode="OGR"):
+def getDsOrIndexGeomExtent(ds = None, coords = None, mode="OGR"):
 
     # Extract instance extent coordinates
     if ds != None:
-        xMin, yMin, xMax, yMax = getCoordsExtent(ds)
+        if type(ds) == str:
+            ds = gdal.Open(ds)
+        xMin, yMin, xMax, yMax = getDsCoordsExtent(ds)
     
     if coords != None:
         xMin, yMin, xMax, yMax = coords
@@ -649,6 +661,9 @@ def getGeomExtent(ds = None, coords = None, mode="OGR"):
     return polygon_env
 
 def getBandsRowsColsFromDs(ds):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
+
     nBands = 0
     while ds.GetRasterBand(nBands+1) != None:
         nBands += 1
@@ -668,17 +683,19 @@ def getBandsRowsColsFromArray(array):
     return nBands, nRows, nCols
 
 def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
 
     # Get initial image resolution
-    xRes, yRes = getPixelSize(ds)
+    xRes, yRes = getDsPixelSize(ds)
 
     # Get initial image extent
-    A = getGeomExtent(ds = ds, mode = "SHAPELY")
+    A = getDsOrIndexGeomExtent(ds = ds, mode = "SHAPELY")
     AxMin = A.bounds[0]
     AyMax = A.bounds[3]
 
     # Get argument extent
-    B = getGeomExtent(coords = (BxMin, ByMin, BxMax, ByMax), mode = "SHAPELY")
+    B = getDsOrIndexGeomExtent(coords = (BxMin, ByMin, BxMax, ByMax), mode = "SHAPELY")
 
     # Get intersection extent
     C = A.intersection(B)
@@ -697,6 +714,8 @@ def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
     return row1, col1, row2, col2
 
 def cropDsFromVector(ds, vector, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, polygon=0):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
 
     # If vector argument is a path to a shapefile,
     # here we extract only one polygon of this shapefile
@@ -713,7 +732,7 @@ def cropDsFromVector(ds, vector, ds_encoding = gdalconst.GDT_Float32, ar_encodin
     custom_orX = xMin
     custom_orY = yMax
     nBands, nRows, nCols = getBandsRowsColsFromArray(custom_array)
-    xRes, yRes = getPixelSize(ds)
+    xRes, yRes = getDsPixelSize(ds)
     crs = ds.GetProjection()
 
     # Create a new dataset with the array cropped
@@ -726,8 +745,8 @@ def cropDsFromRaster(slave_ds, master_ds):
         master_ds = gdal.Open(master_ds)
 
     # Extract geometries
-    slave_extent = getGeomExtent(slave_ds, mode="shapely")
-    master_extent = getGeomExtent(master_ds, mode="shapely")
+    slave_extent = getDsOrIndexGeomExtent(slave_ds, mode="shapely")
+    master_extent = getDsOrIndexGeomExtent(master_ds, mode="shapely")
 
     # Intersect themselves
     inter_extent = slave_extent.intersection(master_extent)
@@ -736,6 +755,9 @@ def cropDsFromRaster(slave_ds, master_ds):
     return cropDsFromVector(slave_ds, inter_extent)
 
 def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
+
     col1, row1, col2, row2 = index
     ls_stack = []
     num_band = 0
@@ -751,8 +773,8 @@ def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding 
         im_array = ds.GetRasterBand(1).ReadAsArray(col1, row1, col2-col1, row2-row1).astype(ar_encoding)
 
     # Get input dataset metadata
-    xRes, yRes = getPixelSize(ds)
-    old_orX, old_orY = getOriginPoint(ds)
+    xRes, yRes = getDsPixelSize(ds)
+    old_orX, old_orY = getDsOriginPoint(ds)
 
     # Compute new origin point
     new_orX = old_orX + (col1 * xRes)
@@ -773,6 +795,8 @@ def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding 
     return newDs
 
 def resizeDs(ds, xRes, yRes, resMethod="near"):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
 
     ds_resized = gdal.Warp(
         destNameOrDestDS="",
@@ -785,6 +809,9 @@ def resizeDs(ds, xRes, yRes, resMethod="near"):
     return ds_resized
 
 def reprojDs(ds, epsg):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
+
     if type(epsg) == int:
         srs = osr.SpatialReference()
         srs.ImportFromEPSG(epsg)
@@ -794,17 +821,23 @@ def reprojDs(ds, epsg):
     return gdal.Warp("", ds, format = "VRT", dstSRS = crs)
 
 def chooseBandFromDs(ds, index, ar_encoding=np.float32, ds_encoding=gdalconst.GDT_Float32):
-    orX, orY = getOriginPoint(ds)
-    xRes, yRes = getPixelSize(ds)
+    if type(ds) == str:
+        ds = gdal.Open(ds)
+
+    orX, orY = getDsOriginPoint(ds)
+    xRes, yRes = getDsPixelSize(ds)
     crs = ds.GetProjection()
     array = ds.GetRasterBand(index).ReadAsArray(ar_encoding)
+    array = ds.GetRasterBand(index).ReadAsArray().astype(ar_encoding)
     return makeDs("", array, orX, xRes, orY, yRes, crs, "MEM", ds_encoding)
 
 def setOriginPoint(ds, offsetX, offsetY, ds_encoding, ar_encoding):
+    if type(ds) == str:
+        ds = gdal.Open(ds)
 
     # Get metadata
-    xRes, yRes = getPixelSize(ds)
-    orX, orY = getOriginPoint(ds)
+    xRes, yRes = getDsPixelSize(ds)
+    orX, orY = getDsOriginPoint(ds)
 
     # shift
     ds.SetGeoTransform((orX + offsetX, xRes, 0.0, orY + offsetY, 0.0, yRes))
@@ -812,7 +845,18 @@ def setOriginPoint(ds, offsetX, offsetY, ds_encoding, ar_encoding):
     return ds
 
 def stackDs(ls_ds, ar_encoding=np.float32):
+
+    # potential path conversion into osgeo.gdal.Dataset objects
+    i=0
+    for ds in ls_ds:
+        if type(ds) == str:
+            ls_ds[i] = gdal.Open(ds)
+        i+=1
+
+    # Extract the first dataset
     stack_ds = ls_ds[0]
+
+    # Add to those bands the first band of each others dataset
     i = 0
     for ds in ls_ds[1:]:
         i+=1
@@ -824,6 +868,14 @@ def stackGeoIms(geoims):
     return geoims[0].stack(geoims[1:], inplace=False)
 
 def mergeDs(ls_ds, proj = None):
+
+    # potential path conversion into osgeo.gdal.Dataset objects
+    i=0
+    for ds in ls_ds:
+        if type(ds) == str:
+            ls_ds[i] = gdal.Open(ds)
+        i+=1
+
     if proj == None:
         proj = ls_ds[0].GetProjection()
     
