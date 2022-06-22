@@ -85,7 +85,7 @@ class GeoIm:
              getCoordsExtent    |                       | send a tuple : 
                                 |                       | (xMin, yMin, xMax, yMax)
             --------------------------------------------------------------------------------------------
-            getOrIndexGeomExtent| mode : str          | send a geometry. If the mode is "ogr", 
+            getOrIndexGeomExtent| mode : str            | send a geometry. If the mode is "ogr", 
                                 | default = "ogr"       | it's osgeo.ogr.geometry object. If 
                                 |                       | the mode is "shapely", it send a 
                                 |                       | shapely.geometry.Polygon. 
@@ -204,9 +204,6 @@ class GeoIm:
             crs = self.ds.GetProjection()
         else:
             orX, xRes, orY, yRes, crs = geodata
-
-        # Get array dimensions
-        nBands, nRows, nCols = self.shape()
 
         # Make a new memory dataset
         newds = makeDs(
