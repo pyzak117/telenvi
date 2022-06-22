@@ -1,8 +1,16 @@
 """
-Functions to work with osgeo.gdal.Dataset objects.
-Here you find some functions to work directly on this kind of objects.
-And you find a class called GeoIm. Each instance of this class integrate a osgeo.gdal.Dataset
-and an array. The methods of GeoIm are more simple than gdal.Dataset methods.
+Here we find tools to process georeferenced rasters.
+Thoses tools formed two categories :
+    - there is functions to work directly on osgeo.gdal.Dataset
+      more friendly and with a more intuitive syntax than the
+      osgeo.gdal functions and osgeo.gdal.Dataset methods.
+
+    - and a class called GeoIm. The main interest of this class
+      is to place in the same place an array, and a osgeo.gdal.
+      Dataset. You don't have to call osgeo.gdal.Dataset.ReadAs
+      Array() because the array is computed only when it's man-
+      datory, after a gdal.Warp resampling or reprojection for
+      example.
 """
 
 # Third-Party libraries
