@@ -46,12 +46,11 @@ class GeoIm:
                     |            |  of the space unit represented by his pixels (wrongly commonly 
                     |            |  called "spatial resolution"), the coordinates of his origin
                     |            |  point, the name of the Coordinates System Reference in which
-                    |            |  are wrote this coordinates... 
+                    |            |  are wrote this coordinates 
             --------------------------------------------------------------------------------------------
         ds_encoding | gdalconst | the instance's osgeo.gdal.Dataset format
             --------------------------------------------------------------------------------------------
         ar_encoding | np.ndtype | the instance's array numeric format
-
 
     methods
     -------
@@ -61,24 +60,24 @@ class GeoIm:
             This kind of methods will help you to get all the lovely geo-data, contained 
             in the osgeo.gdal.Dataset of each GeoIm instance, because use directly this 
             Dataset can sometimes be not very easy or natural. All this functions-names
-            start by "get" like "getDsPixelSize()" or "getDsOrIndexGeomExtent()". Except the function
+            start by "get" like "getPixelSize()" or "getDsOrIndexGeomExtent()". Except the function
             to get the number of bands, the height and the width of an image, because this
             one is called "shape" to looks like the .shape attribute of a numpy.ndarray.
 
              name               | arguments             | short description
             --------------------------------------------------------------------------------------------
-             getDsOriginPoint     |                       | send a tuple : (originX, originY) 
+             getOriginPoint     |                       | send a tuple : (originX, originY) 
                                 |                       | this coordinates are wrote in the 
                                 |                       | Coordinates Reference System 
                                 |                       | of the image
             --------------------------------------------------------------------------------------------
-             getDsPixelSize       |                       | send a tuple : (resX, resY)
+             getPixelSize       |                       | send a tuple : (resX, resY)
                                 |                       |  or (pixelSizeX, pixelSizeY)
             --------------------------------------------------------------------------------------------
-             getDsCoordsExtent    |                       | send a tuple : 
+             getCoordsExtent    |                       | send a tuple : 
                                 |                       | (xMin, yMin, xMax, yMax)
             --------------------------------------------------------------------------------------------
-             getDsOrIndexGeomExtent      | mode : str            | send a geometry. If the mode is "ogr", 
+            getOrIndexGeomExtent| mode : str          | send a geometry. If the mode is "ogr", 
                                 | default = "ogr"       | it's osgeo.ogr.geometry object. If 
                                 |                       | the mode is "shapely", it send a 
                                 |                       | shapely.geometry.Polygon. 
@@ -95,11 +94,11 @@ class GeoIm:
 
         Part 2 : the setters
             This kind of methods will help you to manipulate your GeoIm instances: You can
-            change the size-space unit of the pixels of an image, the SCR, the origin point...
+            change the size-space unit of the pixels of an image, the SCR, the origin point
 
              name               | arguments             | short description
             --------------------------------------------------------------------------------------------
-             setOriginPoint     |                       | offsetX is added to the origin X of the GeoIm.
+             shiftOriginPoint   |                       | offsetX is added to the origin X of the GeoIm.    
                                 | offsetX : float       | offsetY is added to the origin Y of the GeoIm.
                                 | offsetY : float       | if inplace, change the originPoint of the instance.
                                 | inplace : bool        | It can be used to literally move the image in space.
@@ -164,11 +163,20 @@ class GeoIm:
                                 |                       | and the last is his bottom left part.
     """
 
-    def __init__(self, GDALdataset, ds_encoding = gdalconst.GDT_Float32, array_encoding = np.float32):
+    # @duration
+    def __init__(self, GDALdataset, array = False, ds_encoding = gdalconst.GDT_Float32, array_encoding = np.float32):
         self.array_encoding = array_encoding
         self.ds_encoding = ds_encoding
         self.ds = GDALdataset
-        self.array = self.ds.ReadAsArray().astype(array_encoding)
+
+        # dev notes 
+        # permet d'éviter le temps de chargement lorsque l'array est déjà connue
+        if type(array) == np.ndarray:
+                self.array = array
+
+        else:
+            # print("read as array")
+            self.array = self.ds.ReadAsArray().astype(array_encoding)
 
     def _updateArray(self):
         """
@@ -183,8 +191,8 @@ class GeoIm:
 
         # Get geographic informations
         if geodata == None:
-            xRes, yRes = self.getDsPixelSize()
-            orX, orY = self.getDsOriginPoint()
+            xRes, yRes = self.getPixelSize()
+            orX, orY = self.getOriginPoint()
             crs = self.ds.GetProjection()
         else:
             orX, xRes, orY, yRes, crs = geodata
@@ -216,52 +224,166 @@ class GeoIm:
         return self.array[index]
 
     def copy(self):
-        return GeoIm(self.ds)
+        """
+        send a copy of the current instance
+        """
+        return GeoIm(self.ds, array=self.array)
 
     def shape(self):
+        """
+        send a tuple (numBands, numRows, numCols)
+        """
         return getBandsRowsColsFromArray(self.array)
 
-    def getDsOriginPoint(self):
+    def getOriginPoint(self):
+        """
+        send a tuple (originX, originY)
+        """
         return getDsOriginPoint(self.ds)
 
-    def getDsPixelSize(self):
+    def getPixelSize(self):
+        """
+        send a tuple (pixelSizeX, pixelSizeY)
+        """
         return getDsPixelSize(self.ds)
 
-    def getDsOrIndexGeomExtent(self, mode="OGR"):
+    def getOrIndexGeomExtent(self, mode="OGR"):
+        """
+        :descr:
+            compute the geographic extent of the current instance
+
+        :params:
+            mode : str - describe the type of the geometry.
+                   default = 'OGR'
+                   alternative = 'SHAPELY'
+
+        :return:
+            geom : osgeo.ogr.geometry or shapely.geometry.polygon
+                a geometry representing the extent
+        """
         return getDsOrIndexGeomExtent(self.ds)
 
-    def getDsCoordsExtent(self):
+    def getCoordsExtent(self):
+        """
+        send a tuple(xMin, yMin, xMax, yMax)
+        """
         return getDsCoordsExtent(self.ds)
 
-    def setOriginPoint(self, offsetX, offsetY, inplace=True):
+    def shiftOriginPoint(self, offsetX, offsetY, inplace=True):
         """
-        Move the raster by offsetX coordinates system reference unity, same for offsetY
-        """
-        shiftedDs = setOriginPoint(self.ds, offsetX, offsetY, self.ds_encoding, self.array_encoding)
+        :descr:
+            offsetX is added to the origin X of the GeoIm.    
+            offsetY is added to the origin Y of the GeoIm.
+
+        :params:
+            offsetX : float - 
+                The distance to shift the image origin point
+                (in general, north-west corner) along the X axe. 
+                Exprimate in a coordinates system reference 
+                space unit ( meters or degrees, according to 
+                the SCR).
+
+            offsetY : float -
+                same as offsetX but for the Y axe.
+
+            inplace : boolean
+
+        :return:
+            if inplace, send a new geoim shifted.
+            else, modify the current instance itself and return None.
+            """
+
+        shiftedDs = shiftOriginPoint(self.ds, offsetX, offsetY)
         if inplace:
             self.ds = shiftedDs
-            self._updateArray()
-        else:    
-            return GeoIm(shiftedDs)
+
+        # On connaît l'array, elle ne change pas. Donc, inutile de la re-déduire du dataset
+        # dans la fonction d'initialisation du nouveau GeoIm.
+        else:
+            return GeoIm(shiftedDs, array = self.array)
+
+    def splitBands(indexes):
+        ls_geoims = []
+        for index in indexes:
+            pass
+        pass
 
     def cropFromVector(self, vector, polygon=0, inplace=True):
-        crop_ds = cropDsFromVector(self.ds, vector, ar_encoding=self.array_encoding, ds_encoding=self.ds_encoding, polygon=polygon)
+        """
+        :descr:
+            cut the image according to a vector geometry
+
+        :params:
+            vector : str or shapely.geometry.polygon -
+                describe the spatial extent on which the image 
+                will be cropped. If it's a string, it must be
+                a path to a shapefile. 
+
+            polygon (facultative) : int
+                if the vector argument is a path to shapefile,
+                this argument specify the id of the polygon
+                inside this shapefile to use
+
+            inplace : boolean
+
+        :return:
+            if inplace, send a new geoim cropped.
+            else, modify the current instance itself and return None.
+        
+        """
+
+        crop_ds, crop_array = cropDsFromVector(self.ds, vector, geoim_mode = True, ar_encoding=self.array_encoding, ds_encoding=self.ds_encoding, polygon=polygon)
         if inplace:
             self.ds = crop_ds
-            self._updateArray()
+            self.array = crop_array
         else:    
-            return GeoIm(crop_ds)
+            return GeoIm(crop_ds, array=crop_array)
         
     def cropFromRaster(self, master_ds, inplace=True):
-        crop_ds = cropDsFromRaster(self.ds, master_ds)
+        """
+        :descr:
+            cut the image according to another raster extent
+
+        :params:
+            master_ds : str or osgeo.gdal.Dataset -
+                describe the spatial extent on which the image 
+                will be cropped. If it's a string, it must be
+                a path to a raster file. 
+
+            inplace : boolean
+
+        :return:
+            if inplace, send a new geoim cropped.
+            else, modify the current instance itself and return None.
+        
+        """
+
+        crop_ds, crop_array = cropDsFromRaster(self.ds, master_ds, geoim_mode=True)
         if inplace:
             self.ds = crop_ds
-            self._updateArray()
+            self.array = crop_array
         else:
-            return GeoIm(crop_ds)        
+            return GeoIm(crop_ds, array=crop_array)
 
     def cropFromIndex(self, index, inplace=True):
 
+        """
+        :descr:
+            cut the image according to an matrixian area
+
+        :params:
+            index : tuple -
+                (firstColumn, firstRow, lastColumn, lastRow)
+                describe the spatial extent on which the image 
+                will be cropped.
+
+            inplace : boolean
+
+        :return:
+            if inplace, send a new geoim cropped.
+            else, modify the current instance itself and return None.
+        
+        """
         if inplace: 
             target = self
         else:
@@ -277,8 +399,8 @@ class GeoIm:
             target.array = target.array[0:nBands, row1:row2, col1:col2]
 
         # Get Metadata
-        xRes, yRes = target.getDsPixelSize()
-        old_orX, old_orY = target.getDsOriginPoint()
+        xRes, yRes = target.getPixelSize()
+        old_orX, old_orY = target.getOriginPoint()
 
         # Compute new origin point
         new_orX = old_orX + (col1 * xRes)
@@ -289,8 +411,28 @@ class GeoIm:
 
         if not inplace: return target
 
-    def resize(self, xRes, yRes, method="near", inplace=True):
-        res_ds = resizeDs(self.ds, xRes, yRes, method)
+    def resize(self, pSizeX, pSizeY, method="near", inplace=True):
+        """
+        :descr:
+            change the spatial size of the pixels, sometimes
+            (wrongly) called "spatial resolution"
+
+        :params:
+            pSizeX : float - the X pixel size
+            pSizeY : float - the Y pixel size
+            method : str - the resampling algorithm
+                default = "near"
+                type help(telenvi.raster_tools.resizeDs) to see
+                all the alternative methods
+            inplace : boolean
+
+        :return:
+            if inplace, send a new geoim resampled.
+            else, modify the current instance itself and return None.
+        
+        """
+
+        res_ds = resizeDs(self.ds, pSizeX, pSizeY, method)
         if inplace: 
             self.ds = res_ds
             self._updateArray()
@@ -298,7 +440,37 @@ class GeoIm:
             return res_ds
 
     def stack(self, ls_geoim, inplace=True):
+        """
+        :descr:
+            stack geoim's arrays
 
+                -------------    -------------    -------------    
+              /             /  /             /  /             /    
+             /      A      /  /      B      /  /      C      /     
+            /             /  /             /  /             /      
+            -------------    -------------    -------------     
+
+                                   \/
+
+                              ------------- 
+                            /             / 
+                           /      A      /-  
+                          /             / /
+                          -------------  /-
+                          /      B      / /
+                          -------------  /
+                          /      C      /
+                          -------------
+
+        :params:
+            ls_geoim : list
+                a list containing telenvi.raster_tools.GeoIm objects
+            inplace: boolean
+
+        :return:
+            if inplace, send a new geoim stacked.
+            else, modify the current instance itself and return None.
+        """
         if inplace:
             target = self.copy()
         else:
@@ -312,6 +484,33 @@ class GeoIm:
         return target
 
     def merge(self, ls_geoim, inplace=True):
+        """
+        :descr:
+            merge geoim's arrays : 
+
+                -------------    -------------    -------------    
+              /             /  /             /  /             /    
+             /      A      /  /      B      /  /      C      /     
+            /             /  /             /  /             /      
+            -------------    -------------    -------------     
+
+                                   \/
+
+                  ---------------------------------------
+                /                                       /  
+               /                  ABC                  / 
+              /                                       /  
+              ---------------------------------------
+  
+        :params:
+            ls_geoim : list
+                a list containing telenvi.raster_tools.GeoIm objects
+            inplace: boolean
+
+        :return:
+            if inplace, send a new geoim merged.
+            else, modify the current instance itself and return None.
+        """
         ls_ds = [self.ds] + [geoim.ds for geoim in ls_geoim]
         merged_ds = mergeDs(ls_ds)
         if inplace:
@@ -320,17 +519,80 @@ class GeoIm:
         else:
             return GeoIm(merged_ds)
 
+    def makeMosaic(self, nbSquaresByAx=2):
+        
+        """
+        :descr:
+            display one band of the GeoIm
+
+                  ---------------------------------------
+                /                                       /  
+               /                                       / 
+              /                 ABCD                  /  
+             /                                       /
+            /                                       / 
+           /                                       /                
+           ----------------------------------------  
+                                \/
+    
+                  -------------         -------------   
+                /             /       /             /   
+               /      A      /       /      B      /    
+              /             /       /             /     
+              -------------         -------------    
+    
+             -------------         -------------   
+           /             /       /             /   
+          /      C      /       /      D      /    
+         /             /       /             /     
+         -------------         -------------    
+
+        :params:
+            nbSquaresByAx : int
+                default : 2
+                the number of cells to cells along the X size and the Y size
+                from the current instance. 2 means you will have 4 GeoIms in
+                return. The current instance will be split in 2 lines and 2 cols.
+
+        :returns:
+            mosaic : list
+                a list of GeoIms
+        """
+
+        cells_nRows, cells_nCols = [int(n/nbSquaresByAx) for n in self.shape()[1:]]
+        mosaic = []
+        for row in range(nbSquaresByAx):
+            for col in range(nbSquaresByAx):
+                row1 = cells_nRows * row
+                col1 = cells_nCols * col
+                row2 = row1 + cells_nRows
+                col2 = col1 + cells_nCols
+                mosaic.append(self.cropFromIndex((row1, col1, row2, col2), inplace=False))
+
+        return mosaic
+
     def save(self, outpath, driverName="GTiff"):
         """
-        Create a raster file from the instance
+        :descr:
+            Create a raster file from the instance
+        
+        :params:
+            outpath : str
+                the path of the output file
+            driverName : str
+                default = "GTiff"
+                the outputfile format
+
+        :returns:
+            None
         """
 
         # Get dimensions
         nBands, nRows, nCols = self.shape()
 
         # Get geographic informations
-        xRes, yRes = self.getDsPixelSize()
-        orX, orY = self.getDsOriginPoint()
+        xRes, yRes = self.getPixelSize()
+        orX, orY = self.getOriginPoint()
         crs = self.ds.GetProjection()
 
         # Create a new dataset
@@ -349,6 +611,24 @@ class GeoIm:
         outds.FlushCache()
 
     def quickVisual(self, index = None, band = 0, colors = "viridis"):
+
+        """
+        :descr:
+            display one band of the GeoIm
+        
+        :params:
+            index : tuple
+                default : None - all the image is displayed.
+                alternative : (firstColumn, firstRow, lastColumn, lastRow)
+                described a matrixian area to display
+
+            band : int
+                default = 0
+                the index of the band to display if the geoim is multispectral
+
+        :returns:
+            None
+        """
 
         # Compute nCols and nRows
         nBands, nRows, nCols = self.shape()
@@ -369,6 +649,38 @@ class GeoIm:
         return None
 
     def rgbVisual(self, colorMode=[0,1,2], resize_factor=1, brightness=1, show=False, path=None):
+
+        """
+        :descr:
+            display 3 bands of the GeoIm in RGB mode
+        
+        :params:
+            colorMode : list or tuple
+                the order of the 3 bands to display
+
+            resize_factor : int
+                default : 1
+                allow to "zoom" on the image if the area is to 
+                small to be correctly visualized
+
+            brightness : int
+                default : 1
+                allow to improve the RGB composition brightness. 
+
+            show : boolean
+                default : False
+                if True,the image is displayed in the os system image reader.
+                when this method is called from a Jupyter Notebook, 
+                there's no need to set it on True
+            
+            path : str
+                default : None
+                if not None, the image is not displayed but saved to this path
+
+        :returns:
+            rgb : PIL.Image
+                a RGB image        
+        """
 
         _, nRows, nCols = self.shape()
 
@@ -431,19 +743,6 @@ class GeoIm:
         # Return PIL.Image instance
         return rgb
 
-    def makeMosaic(self, nbSquaresByAx=2):
-        cells_nRows, cells_nCols = [int(n/nbSquaresByAx) for n in self.shape()[1:]]
-        mosaic = []
-        for row in range(nbSquaresByAx):
-            for col in range(nbSquaresByAx):
-                row1 = cells_nRows * row
-                col1 = cells_nCols * col
-                row2 = row1 + cells_nRows
-                col2 = col1 + cells_nCols
-                mosaic.append(self.cropFromIndex((row1, col1, row2, col2), inplace=False))
-
-        return mosaic
-
 def openManyGeoRaster(
     directory,
     pattern,
@@ -457,6 +756,7 @@ def openManyGeoRaster(
     resMethod = "near",
     ar_encoding = np.float32,
     ds_encoding = gdalconst.GDT_Float32,
+    verbose = True,
     *args,
     **kargs
     ):
@@ -489,7 +789,8 @@ def openManyGeoRaster(
             numBand = numBand,
             resMethod = resMethod,
             ar_encoding = ar_encoding,
-            ds_encoding = ds_encoding)
+            ds_encoding = ds_encoding,
+            verbose = verbose)
 
     return x
 
@@ -505,9 +806,63 @@ def openGeoRaster(
     ar_encoding = np.float32,
     ds_encoding = gdalconst.GDT_Float32,
     verbose=True,
-    *args,
-    **kargs
     ):
+
+    """
+    :descr:
+        create a GeoIm object from a raster file.
+        you can specify a lot of settings to this function to setup the future GeoIm.
+    
+    :params:
+
+        mandatory : 
+            rasterPath : str
+                the path to the raster file to open
+
+        facultative :
+            crop : str or tuple
+                if str, this argument is a path to a shapefile or to a rasterfile
+                if tuple, it should be structured as follow : (firstCol, firstRow, lastCol, lastRow). 
+                Each value is exprimated in matrixian coordinates.
+
+            pol : int
+                if crop is a path to a shapefile, pol specify the id of the polygon to use as work
+                extent. 
+            
+            clip : str
+                a path to an other raster. This case is different than just "crop" according to another
+                raster file because here, the resolution, the xOrigin and yOrigin and the spatial 
+                projection are setup according to this other raster file.
+                In output, you got a geoim containing the data of the raster file given as rasterPath,
+                with exactly the same number of rows / cols, the same CRS, the same extent and the same
+                spatial origint than the clip raster.
+            
+            numBand : int
+                the index of the band to load if the rasterPath is multispectral
+            
+            epsg: int
+                the epsg of a Coordinates System Reference. The GeoIm is reproject in this CRS.
+
+            res : float
+                the spatial size of the pixels, sometimes (wrongly) called "spatial resolution"
+
+            resMethod : str
+                default : near
+                the algorithm to use for change the pixel's spatial size
+
+            ar_encoding : numpy.ndtype
+                a numpy.ndtype for the GeoIm's array
+
+            ds_encoding :
+                a gdalconst.type for the GeoIm's dataset
+            
+            verbose: boolean
+                default : True
+                write informations about the geoim preparation
+
+    :returns:
+        geoim : a telenvi.raster_tools.GeoIm instance
+    """
 
     # check target path validity
     if not os.path.exists(rasterPath):
@@ -539,25 +894,30 @@ def openGeoRaster(
 
     # Crop
     if type(crop) == str:
+        if verbose: print("crop")
         if crop[-4:].lower() == ".shp":
             inDs = cropDsFromVector(inDs, crop, polygon=pol)
         elif gdal.Open(crop) != None:
             inDs = cropDsFromRaster(inDs, crop)
     
     elif type(crop) in [list, tuple]:
+        if verbose: print("reduce extent")
         # xMin, yMin, xMax, yMax
         inDs = cropDsFromIndex(inDs, crop)
 
     # Reprojection
     if epsg != None:
+        if verbose: print("change spatial projection")
         inDs = reprojDs(inDs, epsg)
 
     # Resample
     if res != None:
+        if verbose: print("change the pixels spatial size")
         inDs = resizeDs(inDs, xRes=res, yRes=res, resMethod=resMethod)
     
     # Extract interest band
     if numBand != None:
+        if verbose: print(f"extract the band {numBand}")
         inDs = chooseBandFromDs(inDs, numBand, ar_encoding, ds_encoding)
 
     # Switch
@@ -566,11 +926,12 @@ def openGeoRaster(
         ma_orX, ma_orY = getDsOriginPoint(master_ds)
         gapX = in_orX - ma_orX
         gapY = in_orY - ma_orY
-        inDs = setOriginPoint(inDs, gapX, gapY, ds_encoding, ar_encoding)
+        if verbose: print("shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
+        inDs = shiftOriginPoint(inDs, gapX, gapY)
 
-    geoim = GeoIm(inDs, ds_encoding, ar_encoding)
+    geoim = GeoIm(inDs, ds_encoding = ds_encoding, array_encoding = ar_encoding)
     
-    if verbose: print(f"{os.path.basename(rasterPath)} loaded")
+    if verbose: print(f"geoim from file {os.path.basename(rasterPath)} ready")
     return geoim
 
 def makeDs(
@@ -713,7 +1074,7 @@ def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
 
     return row1, col1, row2, col2
 
-def cropDsFromVector(ds, vector, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, polygon=0):
+def cropDsFromVector(ds, vector, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, polygon=0):
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -735,10 +1096,13 @@ def cropDsFromVector(ds, vector, ds_encoding = gdalconst.GDT_Float32, ar_encodin
     xRes, yRes = getDsPixelSize(ds)
     crs = ds.GetProjection()
 
+    if geoim_mode:
+        return makeDs("", custom_array, custom_orX, xRes, custom_orY, yRes, crs, "MEM", ds_encoding), custom_array
+
     # Create a new dataset with the array cropped
     return makeDs("", custom_array, custom_orX, xRes, custom_orY, yRes, crs, "MEM", ds_encoding)
 
-def cropDsFromRaster(slave_ds, master_ds):
+def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False):
     if type(slave_ds) == str:
         slave_ds = gdal.Open(slave_ds)
     if type(master_ds) == str:
@@ -752,7 +1116,7 @@ def cropDsFromRaster(slave_ds, master_ds):
     inter_extent = slave_extent.intersection(master_extent)
 
     # Get data on the intersection area
-    return cropDsFromVector(slave_ds, inter_extent)
+    return cropDsFromVector(slave_ds, inter_extent, geoim_mode=geoim_mode)
 
 def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
     if type(ds) == str:
@@ -827,11 +1191,10 @@ def chooseBandFromDs(ds, index, ar_encoding=np.float32, ds_encoding=gdalconst.GD
     orX, orY = getDsOriginPoint(ds)
     xRes, yRes = getDsPixelSize(ds)
     crs = ds.GetProjection()
-    array = ds.GetRasterBand(index).ReadAsArray(ar_encoding)
     array = ds.GetRasterBand(index).ReadAsArray().astype(ar_encoding)
     return makeDs("", array, orX, xRes, orY, yRes, crs, "MEM", ds_encoding)
 
-def setOriginPoint(ds, offsetX, offsetY, ds_encoding, ar_encoding):
+def shiftOriginPoint(ds, offsetX, offsetY):
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -888,3 +1251,15 @@ def mergeDs(ls_ds, proj = None):
 
 def mergeGeoIms(geoims):
     return geoims[0].merge(geoims[1:], inplace=False)
+
+# def duration(func):
+#     """
+#     dev func - a decorator to compute the execution time of a function
+#     """
+#     import time
+#     def wrapper(*args, **kwargs):
+#         start = time.time()
+#         func(*args, **kwargs)
+#         dur = time.time() - start
+#         print(dur)
+#     return wrapper
