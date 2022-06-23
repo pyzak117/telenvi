@@ -85,7 +85,7 @@ class GeoIm:
              getCoordsExtent    |                       | send a tuple : 
                                 |                       | (xMin, yMin, xMax, yMax)
             --------------------------------------------------------------------------------------------
-            getOrIndexGeomExtent| mode : str            | send a geometry. If the mode is "ogr", 
+            getIndexGeomExtent| mode : str              | send a geometry. If the mode is "ogr", 
                                 | default = "ogr"       | it's osgeo.ogr.geometry object. If 
                                 |                       | the mode is "shapely", it send a 
                                 |                       | shapely.geometry.Polygon. 
@@ -252,7 +252,7 @@ class GeoIm:
         """
         return getDsPixelSize(self.ds)
 
-    def getOrIndexGeomExtent(self, mode="OGR"):
+    def getIndexGeomExtent(self, mode="OGR"):
         """
         :descr:
             compute the geographic extent of the current instance
@@ -298,7 +298,7 @@ class GeoIm:
             else, modify the current instance itself and return None.
             """
 
-        shiftedDs = shiftOriginPoint(self.ds, offsetX, offsetY)
+        shiftedDs = shiftDsOriginPoint(self.ds, offsetX, offsetY)
         if inplace:
             self.ds = shiftedDs
 
@@ -379,7 +379,7 @@ class GeoIm:
         :params:
             index : tuple -
                 (firstColumn, firstRow, lastColumn, lastRow)
-                describe the spatial extent on which the image 
+                describe the matrixian extent on which the image 
                 will be cropped.
 
             inplace : boolean
@@ -932,7 +932,7 @@ def openGeoRaster(
         gapX = in_orX - ma_orX
         gapY = in_orY - ma_orY
         if verbose: print("shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
-        inDs = shiftOriginPoint(inDs, gapX, gapY)
+        inDs = shiftDsOriginPoint(inDs, gapX, gapY)
 
     geoim = GeoIm(inDs, ds_encoding = ds_encoding, array_encoding = ar_encoding)
     
@@ -970,16 +970,36 @@ def makeDs(
     return newds
 
 def getDsOriginPoint(ds):
+    """
+    ds : osgeo.gdal.Dataset or str
+        if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+    send a tuple (numBands, numRows, numCols)
+    """
     if type(ds) == str:
         ds = gdal.Open(ds)
     return (ds.GetGeoTransform()[0], ds.GetGeoTransform()[3])
 
 def getDsPixelSize(ds):
+    """
+    ds : osgeo.gdal.Dataset or str
+        if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+    send a tuple (pixelSizeX, pixelSizeY)
+    """
+
     if type(ds) == str:
         ds = gdal.Open(ds)
     return (ds.GetGeoTransform()[1], ds.GetGeoTransform()[5])
 
 def getDsCoordsExtent(ds):
+    """
+    ds : osgeo.gdal.Dataset or str
+        if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+    send a tuple (xMin, yMin, xMax, yMax)
+    """
+
     if type(ds) == str:
         ds = gdal.Open(ds)
     nRows, nCols = ds.RasterYSize, ds.RasterXSize
@@ -990,6 +1010,19 @@ def getDsCoordsExtent(ds):
     return xMin, yMin, xMax, yMax
 
 def getDsOrIndexGeomExtent(ds = None, coords = None, mode="OGR"):
+    """
+    :descr:
+        compute the geographic extent of a raster
+
+    :params:
+        mode : str - describe the type of the geometry.
+                default = 'OGR'
+                alternative = 'SHAPELY'
+
+    :return:
+        geom : osgeo.ogr.geometry or shapely.geometry.polygon
+            a geometry representing the raster extent
+    """
 
     # Extract instance extent coordinates
     if ds != None:
@@ -1027,6 +1060,13 @@ def getDsOrIndexGeomExtent(ds = None, coords = None, mode="OGR"):
     return polygon_env
 
 def getBandsRowsColsFromDs(ds):
+    """
+    ds : osgeo.gdal.Dataset or str
+        if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+    send a tuple (numBands, numRows, numCols)
+    """
+
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1038,6 +1078,11 @@ def getBandsRowsColsFromDs(ds):
     return nBands, nRows, nCols
 
 def getBandsRowsColsFromArray(array):
+    """
+    array : numpy.ndarray - 2D or 3D
+
+    send a tuple (numBands, numRows, numCols)
+    """
     ar_dims = len(array.shape)
     if ar_dims == 2:
         nBands, nRows, nCols = (1,) + array.shape
@@ -1049,6 +1094,23 @@ def getBandsRowsColsFromArray(array):
     return nBands, nRows, nCols
 
 def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
+    """
+    :descr:
+        compute the matrixian coordinates of an area described by his bounds inside a dataset's array 
+
+    :params:
+        ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+        BxMin : float - the xMin coordinates of the area
+        ByMin : idem
+        BxMax : idem
+        ByMax : idem
+
+    :returns:
+        a tuple (row1, col1, row2, col2)
+
+    """
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1079,7 +1141,28 @@ def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
 
     return row1, col1, row2, col2
 
-def cropDsFromVector(ds, vector, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, polygon=0):
+def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
+    """
+    :descr:
+        cut the image according to a vector geometry
+
+    :params:
+        ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+        vector : str or shapely.geometry.polygon -
+            describe the spatial extent on which the image 
+            will be cropped. If it's a string, it must be
+            a path to a shapefile. 
+
+        polygon (facultative) : int
+            if the vector argument is a path to shapefile,
+            this argument specify the id of the polygon
+            inside this shapefile to use
+
+    :return:
+        a new osgeo.gdal.Dataset
+    """
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1108,6 +1191,23 @@ def cropDsFromVector(ds, vector, geoim_mode = False, ds_encoding = gdalconst.GDT
     return makeDs("", custom_array, custom_orX, xRes, custom_orY, yRes, crs, "MEM", ds_encoding)
 
 def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False):
+    """
+    :descr:
+        cut the image according to another raster extent
+
+    :params:
+        slave_ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+        master_ds : osgeo.gdal.Dataset or str 
+            describe the spatial extent on which the image 
+            will be cropped. If it's a string, it must be
+            a path to a raster file. 
+
+    :return:
+        a new osgeo.gdal.Dataset
+    """
+
     if type(slave_ds) == str:
         slave_ds = gdal.Open(slave_ds)
     if type(master_ds) == str:
@@ -1124,6 +1224,22 @@ def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False):
     return cropDsFromVector(slave_ds, inter_extent, geoim_mode=geoim_mode)
 
 def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
+    """
+        :descr:
+            cut the image according to an matrixian area
+
+        :params:
+        ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+        
+        index : tuple -
+            (firstColumn, firstRow, lastColumn, lastRow)
+            describe the matrixian extent on which the image 
+            will be cropped.
+
+        :return:
+            a new osgeo.gdal.Dataset
+    """
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1163,7 +1279,37 @@ def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding 
 
     return newDs
 
-def resizeDs(ds, xRes, yRes, resMethod="near"):
+def resizeDs(ds, pSizeX, pSizeY, resMethod="near"):
+    """
+    :descr:
+        change the spatial size of the pixels, sometimes
+        (wrongly) called "spatial resolution"
+
+    :params:
+        ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+        pSizeX : float - the X pixel size
+        pSizeY : float - the Y pixel size
+        method : str - the resampling algorithm
+            default : "near"
+            alternatives :
+                "bilinear"   
+                "cubic"      
+                "cubicspline"
+                "lanczos"    
+                "average"    
+                "rms"        
+                "max"        
+                "min"        
+                "med"        
+                "q1"         
+                "q3"         
+                "sum"
+
+    :return:
+        a new osgeo.gdal.Dataset
+    """
+
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1171,13 +1317,28 @@ def resizeDs(ds, xRes, yRes, resMethod="near"):
         destNameOrDestDS="",
         srcDSOrSrcDSTab = ds,
         format = "VRT",
-        xRes = xRes,
-        yRes = yRes,
+        xRes = pSizeX,
+        yRes = pSizeY,
         resampleAlg = resMethod)
     
     return ds_resized
 
 def reprojDs(ds, epsg):
+    """
+    :descr:
+        change the Coordinates Reference System of a raster
+        and reproject it into the new CRS
+
+    :params:
+        ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+        epsg : 
+            the epsg of the new CRS
+
+    :return:
+        a new osgeo.gdal.Dataset
+    
+    """
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1190,6 +1351,21 @@ def reprojDs(ds, epsg):
     return gdal.Warp("", ds, format = "VRT", dstSRS = crs)
 
 def chooseBandFromDs(ds, index, ar_encoding=np.float32, ds_encoding=gdalconst.GDT_Float32):
+    """
+    :descr:
+        send a osgeo.gdal.Dataset with only one band
+
+    :params:
+        ds : osgeo.gdal.Dataset or str
+            if str, convert into osgeo.gdal.Dataset with gdal.Open()
+        index : int
+            the index of the band to  extract
+
+    :return:
+        a new osgeo.gdal.Dataset
+    
+    """
+
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1199,7 +1375,26 @@ def chooseBandFromDs(ds, index, ar_encoding=np.float32, ds_encoding=gdalconst.GD
     array = ds.GetRasterBand(index).ReadAsArray().astype(ar_encoding)
     return makeDs("", array, orX, xRes, orY, yRes, crs, "MEM", ds_encoding)
 
-def shiftOriginPoint(ds, offsetX, offsetY):
+def shiftDsOriginPoint(ds, offsetX, offsetY):
+    """
+    :descr:
+        offsetX is added to the origin X of the dataset.    
+        offsetY is added to the origin Y of the dataset.
+
+    :params:
+        offsetX : float - 
+            The distance to shift the image origin point
+            (in general, north-west corner) along the X axe. 
+            Exprimate in a coordinates system reference 
+            space unit ( meters or degrees, according to 
+            the SCR).
+
+        offsetY : float -
+            same as offsetX but for the Y axe.
+
+    :return:
+        a new osgeo.gdal.Dataset
+    """
     if type(ds) == str:
         ds = gdal.Open(ds)
 
@@ -1213,6 +1408,17 @@ def shiftOriginPoint(ds, offsetX, offsetY):
     return ds
 
 def stackDs(ls_ds, ar_encoding=np.float32):
+    """
+        :descr:
+            stack first band of each osgeo.gdal.Datasets contained in ls_ds
+
+        :params:
+            ls_geoim : list
+                a list containing osgeo.gdal.Datasets objects or a list of raster file paths
+
+        :return:
+            a new osgeo.gdal.Dataset
+    """
 
     # potential path conversion into osgeo.gdal.Dataset objects
     i=0
@@ -1233,9 +1439,24 @@ def stackDs(ls_ds, ar_encoding=np.float32):
     return stack_ds
 
 def stackGeoIms(geoims):
+    """
+    stack different geoims into one
+    return : a new geoim
+    """
     return geoims[0].stack(geoims[1:], inplace=False)
 
 def mergeDs(ls_ds, proj = None):
+    """
+        :descr:
+            merge each osgeo.gdal.Datasets contained in ls_ds into one big dataset
+
+        :params:
+            ls_geoim : list
+                a list containing osgeo.gdal.Datasets objects or a list of raster file paths
+
+        :return:
+            a new osgeo.gdal.Dataset
+    """
 
     # potential path conversion into osgeo.gdal.Dataset objects
     i=0
@@ -1255,6 +1476,9 @@ def mergeDs(ls_ds, proj = None):
     return merged_ds
 
 def mergeGeoIms(geoims):
+    """
+    merge different GeoIm instancess
+    """
     return geoims[0].merge(geoims[1:], inplace=False)
 
 # def duration(func):
