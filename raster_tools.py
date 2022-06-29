@@ -85,7 +85,7 @@ class GeoIm:
              getCoordsExtent    |                       | send a tuple : 
                                 |                       | (xMin, yMin, xMax, yMax)
             --------------------------------------------------------------------------------------------
-            getIndexGeomExtent| mode : str              | send a geometry. If the mode is "ogr", 
+             getGeomExtent      | mode : str            | send a geometry. If the mode is "ogr", 
                                 | default = "ogr"       | it's osgeo.ogr.geometry object. If 
                                 |                       | the mode is "shapely", it send a 
                                 |                       | shapely.geometry.Polygon. 
@@ -252,7 +252,7 @@ class GeoIm:
         """
         return getDsPixelSize(self.ds)
 
-    def getIndexGeomExtent(self, mode="OGR"):
+    def getGeomExtent(self, mode="OGR"):
         """
         :descr:
             compute the geographic extent of the current instance
@@ -834,8 +834,9 @@ def openGeoRaster(
                 if crop is a path to a shapefile, pol specify the id of the polygon to use as work
                 extent. 
             
-            clip : str
-                a path to an other raster. This case is different than just "crop" according to another
+            clip : str or GeoIm
+                A path to an other raster file or a GeoIm object.
+                This case is different than just "crop" according to another
                 raster file because here, the resolution, the xOrigin and yOrigin and the spatial 
                 projection are setup according to this other raster file.
                 In output, you got a geoim containing the data of the raster file given as rasterPath,
@@ -880,8 +881,11 @@ def openGeoRaster(
 
     if clip != None:
 
-        # Open the clip as gdal dataset
-        master_ds = gdal.Open(clip)
+        if type(clip) == str:
+            master_ds = gdal.Open(clip)
+
+        elif type(clip) == GeoIm:
+            master_ds = clip.ds
 
         # Get input and clip resolutions
         master_resX,_ = getDsPixelSize(master_ds)
@@ -931,7 +935,7 @@ def openGeoRaster(
         ma_orX, ma_orY = getDsOriginPoint(master_ds)
         gapX = in_orX - ma_orX
         gapY = in_orY - ma_orY
-        if verbose: print("shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
+        if verbose: print(f"shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
         inDs = shiftDsOriginPoint(inDs, gapX, gapY)
 
     geoim = GeoIm(inDs, ds_encoding = ds_encoding, array_encoding = ar_encoding)
@@ -974,7 +978,7 @@ def getDsOriginPoint(ds):
     ds : osgeo.gdal.Dataset or str
         if str, convert into osgeo.gdal.Dataset with gdal.Open()
 
-    send a tuple (numBands, numRows, numCols)
+    send a tuple (xMin,)
     """
     if type(ds) == str:
         ds = gdal.Open(ds)
@@ -1008,6 +1012,18 @@ def getDsCoordsExtent(ds):
     xMax = xMin + xRes * nCols
     yMin = yMax + yRes * nRows
     return xMin, yMin, xMax, yMax
+
+def getDsProjection(ds):
+    """
+    ds : osgeo.gdal.Dataset or str
+        if str, convert into osgeo.gdal.Dataset with gdal.Open()
+
+    send a string describing the projection
+    """    
+    if type(ds) == str:
+        ds = gdal.Open(ds)
+    
+
 
 def getDsOrIndexGeomExtent(ds = None, coords = None, mode="OGR"):
     """
