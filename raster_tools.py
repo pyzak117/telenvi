@@ -904,6 +904,8 @@ def openGeoRaster(
         crop = clip
 
         # Then we make a special crop, by changing the origin coordinates
+        if verbose: print("crop")
+        if verbose: print("shift")
         inDs = cropDsFromRaster(inDs, crop, shift = True)
 
     # Crop
