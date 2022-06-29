@@ -313,7 +313,7 @@ class GeoIm:
             pass
         pass
 
-    def cropFromVector(self, vector, polygon=0, inplace=True):
+    def cropFromVector(self, vector, polygon=0, shift = False, inplace=True):
         """
         :descr:
             cut the image according to a vector geometry
@@ -337,14 +337,15 @@ class GeoIm:
         
         """
 
-        crop_ds, crop_array = cropDsFromVector(self.ds, vector, geoim_mode = True, ar_encoding=self.array_encoding, ds_encoding=self.ds_encoding, polygon=polygon)
+        crop_ds, crop_array = cropDsFromVector(self.ds, vector, shift = shift, geoim_mode = True, ar_encoding = self.array_encoding, ds_encoding=self.ds_encoding, polygon=polygon)
+
         if inplace:
             self.ds = crop_ds
             self.array = crop_array
         else:    
             return GeoIm(crop_ds, array=crop_array)
         
-    def cropFromRaster(self, master_ds, inplace=True):
+    def cropFromRaster(self, master_ds, shift = False, inplace=True):
         """
         :descr:
             cut the image according to another raster extent
@@ -363,7 +364,7 @@ class GeoIm:
         
         """
 
-        crop_ds, crop_array = cropDsFromRaster(self.ds, master_ds, geoim_mode=True)
+        crop_ds, crop_array = cropDsFromRaster(self.ds, master_ds, geoim_mode=True, shift = shift)
         if inplace:
             self.ds = crop_ds
             self.array = crop_array
@@ -416,15 +417,15 @@ class GeoIm:
 
         if not inplace: return target
 
-    def resize(self, pSizeX, pSizeY, method="near", inplace=True):
+    def resize(self, xRes, yRes, method="near", inplace=True):
         """
         :descr:
             change the spatial size of the pixels, sometimes
             (wrongly) called "spatial resolution"
 
         :params:
-            pSizeX : float - the X pixel size
-            pSizeY : float - the Y pixel size
+            xRes : float - the X pixel size
+            yRes : float - the Y pixel size
             method : str - the resampling algorithm
                 default = "near"
                 type help(telenvi.raster_tools.resizeDs) to see
@@ -437,7 +438,7 @@ class GeoIm:
         
         """
 
-        res_ds = resizeDs(self.ds, pSizeX, pSizeY, method)
+        res_ds = resizeDs(self.ds, xRes, yRes, method)
         if inplace: 
             self.ds = res_ds
             self._updateArray()
@@ -886,7 +887,7 @@ def openGeoRaster(
 
         elif type(clip) == GeoIm:
             master_ds = clip.ds
-
+    
         # Get input and clip resolutions
         master_resX,_ = getDsPixelSize(master_ds)
         input_resX,_ = getDsPixelSize(inDs)
@@ -896,10 +897,14 @@ def openGeoRaster(
             res = master_resX
 
         # Order the reproject the input image into the SCR of the master image
-        epsg = master_ds.GetProjection()
+        if inDs.GetProjection() != master_ds.GetProjection():
+            epsg = master_ds.GetProjection()
 
         # Then we set the crop argument to crop the input image on the extent of clip image
         crop = clip
+
+        # Then we make a special crop, by changing the origin coordinates
+        inDs = cropDsFromRaster(inDs, crop, shift = True)
 
     # Crop
     if type(crop) == str:
@@ -930,13 +935,15 @@ def openGeoRaster(
         inDs = chooseBandFromDs(inDs, numBand, ar_encoding, ds_encoding)
 
     # Switch
-    if clip != None:
-        in_orX, in_orY = getDsOriginPoint(inDs) # After the resampling and the crop
-        ma_orX, ma_orY = getDsOriginPoint(master_ds)
-        gapX = in_orX - ma_orX
-        gapY = in_orY - ma_orY
-        if verbose: print(f"shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
-        inDs = shiftDsOriginPoint(inDs, gapX, gapY)
+ #   if clip != None:
+ #       in_orX, in_orY = getDsOriginPoint(inDs) # After the resampling and the crop
+ #       ma_orX, ma_orY = getDsOriginPoint(master_ds)
+ #       gapX = in_orX - ma_orX
+ #       gapY = in_orY - ma_orY
+ #       print(gapX)
+ #       print(gapY)
+ #       if verbose: print(f"shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
+ #       inDs = shiftDsOriginPoint(inDs, gapX, gapY)
 
     geoim = GeoIm(inDs, ds_encoding = ds_encoding, array_encoding = ar_encoding)
     
@@ -1157,7 +1164,7 @@ def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
 
     return row1, col1, row2, col2
 
-def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
+def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, shift = False):
     """
     :descr:
         cut the image according to a vector geometry
@@ -1176,11 +1183,16 @@ def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gd
             this argument specify the id of the polygon
             inside this shapefile to use
 
+        shift : boolean
+            specify if the new pixel grid has to be shift
+            to match with the input image pixel grid
+
     :return:
         a new osgeo.gdal.Dataset
     """
     if type(ds) == str:
         ds = gdal.Open(ds)
+
 
     # If vector argument is a path to a shapefile,
     # here we extract only one polygon of this shapefile
@@ -1194,10 +1206,20 @@ def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gd
 
     # Crop the array
     custom_array = ds.ReadAsArray(col1, row1, col2-col1, row2-row1).astype(ar_encoding)
-    custom_orX = xMin
-    custom_orY = yMax
-    nBands, nRows, nCols = getBandsRowsColsFromArray(custom_array)
+
+    # Get raster metadata
     xRes, yRes = getDsPixelSize(ds)
+    in_orX, in_orY = getDsOriginPoint(ds)
+
+    # Redefine origins and grid location
+    if shift :
+        custom_orX = xMin
+        custom_orY = yMax
+
+    else:
+        custom_orX = in_orX + (col1 * xRes)
+        custom_orY = in_orY + (row1 * yRes)
+
     crs = ds.GetProjection()
 
     if geoim_mode:
@@ -1206,7 +1228,7 @@ def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gd
     # Create a new dataset with the array cropped
     return makeDs("", custom_array, custom_orX, xRes, custom_orY, yRes, crs, "MEM", ds_encoding)
 
-def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False):
+def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False, shift = False):
     """
     :descr:
         cut the image according to another raster extent
@@ -1219,6 +1241,10 @@ def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False):
             describe the spatial extent on which the image 
             will be cropped. If it's a string, it must be
             a path to a raster file. 
+
+        shift : boolean
+            specify if the new pixel grid has to be shift
+            to match with the input image pixel grid
 
     :return:
         a new osgeo.gdal.Dataset
@@ -1237,7 +1263,7 @@ def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False):
     inter_extent = slave_extent.intersection(master_extent)
 
     # Get data on the intersection area
-    return cropDsFromVector(slave_ds, inter_extent, geoim_mode=geoim_mode)
+    return cropDsFromVector(slave_ds, inter_extent, geoim_mode=geoim_mode, shift = shift)
 
 def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
     """
@@ -1295,7 +1321,7 @@ def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding 
 
     return newDs
 
-def resizeDs(ds, pSizeX, pSizeY, resMethod="near"):
+def resizeDs(ds, xRes, yRes, resMethod="near"):
     """
     :descr:
         change the spatial size of the pixels, sometimes
@@ -1304,8 +1330,8 @@ def resizeDs(ds, pSizeX, pSizeY, resMethod="near"):
     :params:
         ds : osgeo.gdal.Dataset or str
             if str, convert into osgeo.gdal.Dataset with gdal.Open()
-        pSizeX : float - the X pixel size
-        pSizeY : float - the Y pixel size
+        xRes : float - the X pixel size
+        yRes : float - the Y pixel size
         method : str - the resampling algorithm
             default : "near"
             alternatives :
@@ -1333,8 +1359,8 @@ def resizeDs(ds, pSizeX, pSizeY, resMethod="near"):
         destNameOrDestDS="",
         srcDSOrSrcDSTab = ds,
         format = "VRT",
-        xRes = pSizeX,
-        yRes = pSizeY,
+        xRes = xRes,
+        yRes = yRes,
         resampleAlg = resMethod)
     
     return ds_resized
