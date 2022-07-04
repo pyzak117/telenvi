@@ -15,12 +15,14 @@ Thoses tools formed two categories :
 
 # Third-Party libraries
 import numpy as np
+import json
 from osgeo import gdal, gdalconst, osr, ogr
 from matplotlib import pyplot as plt
 from PIL import Image, ImageEnhance
 import geopandas as gpd
 import shapely
 import re
+import __init__
 
 # Standard librairies
 import os
@@ -172,13 +174,15 @@ class GeoIm:
     """
 
     # @duration
-    def __init__(self, GDALdataset, array = False, ds_encoding = gdalconst.GDT_Float32, array_encoding = np.float32):
+    def __init__(self, ds, array = None, ds_encoding = gdalconst.GDT_Float32, array_encoding = np.float32):
         self.array_encoding = array_encoding
         self.ds_encoding = ds_encoding
-        self.ds = GDALdataset
 
-        # dev notes 
-        # permet d'éviter le temps de chargement lorsque l'array est déjà connue
+        if type(ds) == str:
+            self.ds = gdal.Open(ds)
+        elif type(ds) == gdal.Dataset:
+            self.ds = ds
+
         if type(array) == np.ndarray:
                 self.array = array
 
@@ -221,7 +225,14 @@ class GeoIm:
         self.ds = newds
 
     def __repr__(self):
-        self.quickVisual()
+        print(
+f"""pixel size : {self.getPixelSize()}
+origin     : {self.getOriginPoint()}
+bands      : {self.shape()[0]}
+rows       : {self.shape()[1]}
+columns    : {self.shape()[2]}
+SCR epsg   : {self.getEpsg()}
+SCR name   : {self.getProjName()}""")
         return ""
 
     def __getitem__(self, index):
@@ -239,6 +250,35 @@ class GeoIm:
         send a tuple (numBands, numRows, numCols)
         """
         return getBandsRowsColsFromArray(self.array)
+
+    def getWestEastLength(self):
+        xMin, _, xMax, _ = self.getCoordsExtent()
+        return xMax - xMin
+    
+    def getNorthSouthLength(self):
+        _, yMin, _, yMax = self.getCoordsExtent()
+        return yMax - yMin
+        
+    def getArea(self):
+        return round(self.getWestEastLength() * self.getNorthSouthLength())
+
+    def getEpsg(self):
+        """
+        send the spatial coordinates reference system epsg id
+        """
+        sp_ref = osr.SpatialReference(wkt = self.ds.GetProjection())
+        json_proj = json.loads(sp_ref.ExportToPROJJSON())
+        epsg = json_proj["id"]["code"]
+        return int(epsg)
+    
+    def getProjName(self):
+        """
+        send the spatial coordinates reference system name
+        """
+        sp_ref = osr.SpatialReference(wkt = self.ds.GetProjection())
+        json_proj = json.loads(sp_ref.ExportToPROJJSON())
+        projName = json_proj["name"]
+        return projName
 
     def getOriginPoint(self):
         """
@@ -266,7 +306,7 @@ class GeoIm:
             geom : osgeo.ogr.geometry or shapely.geometry.polygon
                 a geometry representing the extent
         """
-        return getDsOrIndexGeomExtent(self.ds)
+        return getDsOrIndexGeomExtent(self.ds, mode=mode)
 
     def getCoordsExtent(self):
         """
@@ -274,7 +314,7 @@ class GeoIm:
         """
         return getDsCoordsExtent(self.ds)
 
-    def shiftOriginPoint(self, offsetX, offsetY, inplace=True):
+    def shiftOriginPoint(self, offsetX, offsetY, inplace=False):
         """
         :descr:
             offsetX is added to the origin X of the GeoIm.    
@@ -301,6 +341,7 @@ class GeoIm:
         shiftedDs = shiftDsOriginPoint(self.ds, offsetX, offsetY)
         if inplace:
             self.ds = shiftedDs
+            return self
 
         # On connaît l'array, elle ne change pas. Donc, inutile de la re-déduire du dataset
         # dans la fonction d'initialisation du nouveau GeoIm.
@@ -313,7 +354,7 @@ class GeoIm:
             pass
         pass
 
-    def cropFromVector(self, vector, polygon=0, shift = False, inplace=True):
+    def cropFromVector(self, vector, polygon=0, shift = False, inplace=False):
         """
         :descr:
             cut the image according to a vector geometry
@@ -342,10 +383,11 @@ class GeoIm:
         if inplace:
             self.ds = crop_ds
             self.array = crop_array
+            return self
         else:    
             return GeoIm(crop_ds, array=crop_array)
         
-    def cropFromRaster(self, master_ds, shift = False, inplace=True):
+    def cropFromRaster(self, master_ds, shift = False, inplace=False):
         """
         :descr:
             cut the image according to another raster extent
@@ -368,10 +410,11 @@ class GeoIm:
         if inplace:
             self.ds = crop_ds
             self.array = crop_array
+            return self
         else:
             return GeoIm(crop_ds, array=crop_array)
 
-    def cropFromIndex(self, index, inplace=True):
+    def cropFromIndex(self, col1, row1, col2, row2, inplace=False):
 
         """
         :descr:
@@ -395,8 +438,6 @@ class GeoIm:
         else:
             target = self.copy()
 
-        col1, row1, col2, row2 = index
-
         # Crop the array
         nBands = target.shape()[0]
         if nBands == 1:
@@ -415,9 +456,9 @@ class GeoIm:
         # Update the dataset's instance
         target._updateDs((new_orX, xRes, new_orY, yRes, target.ds.GetProjection()))
 
-        if not inplace: return target
+        return target
 
-    def resize(self, xRes, yRes, method="near", inplace=True):
+    def resize(self, xRes, yRes, method="near", inplace=False):
         """
         :descr:
             change the spatial size of the pixels, sometimes
@@ -442,10 +483,11 @@ class GeoIm:
         if inplace: 
             self.ds = res_ds
             self._updateArray()
+            return self
         else:
             return res_ds
 
-    def stack(self, ls_geoim, inplace=True):
+    def stack(self, ls_geoim, inplace=False):
         """
         :descr:
             stack geoim's arrays
@@ -489,7 +531,7 @@ class GeoIm:
 
         return target
 
-    def merge(self, ls_geoim, inplace=True):
+    def merge(self, ls_geoim, inplace=False):
         """
         :descr:
             merge geoim's arrays : 
@@ -522,36 +564,37 @@ class GeoIm:
         if inplace:
             self.ds = merged_ds
             self._updateArray()
+            return self
         else:
             return GeoIm(merged_ds)
 
-    def makeMosaic(self, nbSquaresByAx=2):
+    def makeMosaic(self, thumbsY =2, thumbsX = 2):
         
         """
         :descr:
             display one band of the GeoIm
 
-                  ---------------------------------------
-                /                                       /  
-               /                                       / 
-              /                 ABCD                  /  
-             /                                       /
-            /                                       / 
-           /                                       /                
-           ----------------------------------------  
-                                \/
+                    ---------------------------------------
+                  /                                       /  
+                 /                                       / 
+                /                 ABCD                  /  
+               /                                       /
+              /                                       / 
+             /                                       /                
+             ----------------------------------------  
+                                  \/
     
-                  -------------         -------------   
-                /             /       /             /   
-               /      A      /       /      B      /    
-              /             /       /             /     
-              -------------         -------------    
-    
-             -------------         -------------   
-           /             /       /             /   
-          /      C      /       /      D      /    
-         /             /       /             /     
-         -------------         -------------    
+                  -------------            -------------   
+                /             /          /             /   
+               /      A      /          /      B      /    
+              /             /          /             /     
+              -------------            -------------    
+                                 
+             -------------            -------------   
+           /             /          /             /   
+          /      C      /          /      D      /    
+         /             /          /             /     
+         -------------            -------------    
 
         :params:
             nbSquaresByAx : int
@@ -565,15 +608,17 @@ class GeoIm:
                 a list of GeoIms
         """
 
-        cells_nRows, cells_nCols = [int(n/nbSquaresByAx) for n in self.shape()[1:]]
+        cells_nRows = int(self.shape()[1]/thumbsY)
+        cells_nCols = int(self.shape()[2]/thumbsX)
+
         mosaic = []
-        for row in range(nbSquaresByAx):
-            for col in range(nbSquaresByAx):
+        for row in range(thumbsY):
+            for col in range(thumbsX):
                 row1 = cells_nRows * row
                 col1 = cells_nCols * col
                 row2 = row1 + cells_nRows
                 col2 = col1 + cells_nCols
-                mosaic.append(self.cropFromIndex((row1, col1, row2, col2), inplace=False))
+                mosaic.append(self.cropFromIndex(col1, row1, col2, row2))
 
         return mosaic
 
@@ -592,9 +637,6 @@ class GeoIm:
         :returns:
             None
         """
-
-        # Get dimensions
-        nBands, nRows, nCols = self.shape()
 
         # Get geographic informations
         xRes, yRes = self.getPixelSize()
@@ -615,6 +657,8 @@ class GeoIm:
 
         # Write on the disk
         outds.FlushCache()
+
+        print(f"{os.path.basename(outpath)} ok")
 
     def quickVisual(self, index = None, band = 0, colors = "viridis"):
 
@@ -639,7 +683,7 @@ class GeoIm:
         # Compute nCols and nRows
         nBands, nRows, nCols = self.shape()
         if index == None:
-            col1, row1, col2, row2 = 0, 0, nRows-1, nCols-1
+            col1, row1, col2, row2 = 0, 0, nCols-1, nRows-1
         else:
             col1, row1, col2, row2 = index
 
@@ -749,57 +793,6 @@ class GeoIm:
         # Return PIL.Image instance
         return rgb
 
-def openManyGeoRaster(
-    directory,
-    pattern,
-    endKeyPos,
-    crop = None,
-    pol = 0,
-    clip = None,
-    numBand = None,
-    epsg = None,
-    res = None,
-    resMethod = "near",
-    ar_encoding = np.float32,
-    ds_encoding = gdalconst.GDT_Float32,
-    verbose = True,
-    *args,
-    **kargs
-    ):
-
-    # Compile pattern with regular expression
-    rpattern = re.compile(pattern.upper())
-
-    x = {}
-    for fileName in sorted(os.listdir(directory)):
-
-        try : # Get pattern start position in fileName
-            startKeyPos = re.search(rpattern, fileName.upper()).span()[0]
-
-        except AttributeError: # Pattern not find in fileName
-            continue
-        
-        fileBandName = os.path.join(directory, fileName)
-        
-        # Get the key corresponding to the pattern in the fileName
-        bandId = fileName[startKeyPos:endKeyPos]
-
-        # Extract and pack all the data in a lovely dictionnary with bandId as key
-        x[bandId] = openGeoRaster(
-            rasterPath = fileBandName,
-            crop = crop,
-            pol = pol,
-            clip = clip,
-            epsg = epsg,
-            res = res,
-            numBand = numBand,
-            resMethod = resMethod,
-            ar_encoding = ar_encoding,
-            ds_encoding = ds_encoding,
-            verbose = verbose)
-
-    return x
-
 def openGeoRaster(
     rasterPath,
     crop = None,
@@ -811,7 +804,7 @@ def openGeoRaster(
     resMethod = "near",
     ar_encoding = np.float32,
     ds_encoding = gdalconst.GDT_Float32,
-    verbose=True,
+    verbose = True,
     ):
 
     """
@@ -886,6 +879,7 @@ def openGeoRaster(
             master_ds = gdal.Open(clip)
 
         elif type(clip) == GeoIm:
+            print("type GeoIm")
             master_ds = clip.ds
     
         # Get input and clip resolutions
@@ -896,17 +890,8 @@ def openGeoRaster(
         if master_resX != input_resX:
             res = master_resX
 
-        # Order the reproject the input image into the SCR of the master image
-        if inDs.GetProjection() != master_ds.GetProjection():
-            epsg = master_ds.GetProjection()
-
-        # Then we set the crop argument to crop the input image on the extent of clip image
-        crop = clip
-
         # Then we make a special crop, by changing the origin coordinates
-        if verbose: print("crop")
-        if verbose: print("shift")
-        inDs = cropDsFromRaster(inDs, crop, shift = True)
+        inDs = cropDsFromRaster(inDs, master_ds, shift = True)
 
     # Crop
     if type(crop) == str:
@@ -917,8 +902,8 @@ def openGeoRaster(
             inDs = cropDsFromRaster(inDs, crop)
     
     elif type(crop) in [list, tuple]:
-        if verbose: print("reduce extent")
         # xMin, yMin, xMax, yMax
+        if verbose: print("crop")
         inDs = cropDsFromIndex(inDs, crop)
 
     # Reprojection
@@ -936,21 +921,59 @@ def openGeoRaster(
         if verbose: print(f"extract the band {numBand}")
         inDs = chooseBandFromDs(inDs, numBand, ar_encoding, ds_encoding)
 
-    # Switch
- #   if clip != None:
- #       in_orX, in_orY = getDsOriginPoint(inDs) # After the resampling and the crop
- #       ma_orX, ma_orY = getDsOriginPoint(master_ds)
- #       gapX = in_orX - ma_orX
- #       gapY = in_orY - ma_orY
- #       print(gapX)
- #       print(gapY)
- #       if verbose: print(f"shift the raster by {gapX} unit East-West axe and {gapY} unit South-North axe")
- #       inDs = shiftDsOriginPoint(inDs, gapX, gapY)
-
     geoim = GeoIm(inDs, ds_encoding = ds_encoding, array_encoding = ar_encoding)
     
     if verbose: print(f"geoim from file {os.path.basename(rasterPath)} ready")
     return geoim
+
+def openManyGeoRaster(
+    directory,
+    pattern,
+    endKeyPos,
+    crop = None,
+    pol = 0,
+    clip = None,
+    numBand = None,
+    epsg = None,
+    res = None,
+    resMethod = "near",
+    ar_encoding = np.float32,
+    ds_encoding = gdalconst.GDT_Float32,
+    verbose = True
+    ):
+
+    # Compile pattern with regular expression
+    rpattern = re.compile(pattern.upper())
+
+    x = {}
+    for fileName in sorted(os.listdir(directory)):
+
+        try : # Get pattern start position in fileName
+            startKeyPos = re.search(rpattern, fileName.upper()).span()[0]
+
+        except AttributeError: # Pattern not find in fileName
+            continue
+        
+        fileBandName = os.path.join(directory, fileName)
+        
+        # Get the key corresponding to the pattern in the fileName
+        bandId = fileName[startKeyPos:endKeyPos]
+
+        # Extract and pack all the data in a lovely dictionnary with bandId as key
+        x[bandId] = openGeoRaster(
+            rasterPath = fileBandName,
+            crop = crop,
+            pol = pol,
+            clip = clip,
+            epsg = epsg,
+            res = res,
+            numBand = numBand,
+            resMethod = resMethod,
+            ar_encoding = ar_encoding,
+            ds_encoding = ds_encoding,
+            verbose = verbose)
+
+    return x
 
 def makeDs(
     path,
@@ -1031,8 +1054,6 @@ def getDsProjection(ds):
     """    
     if type(ds) == str:
         ds = gdal.Open(ds)
-    
-
 
 def getDsOrIndexGeomExtent(ds = None, coords = None, mode="OGR"):
     """
@@ -1194,7 +1215,6 @@ def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gd
     """
     if type(ds) == str:
         ds = gdal.Open(ds)
-
 
     # If vector argument is a path to a shapefile,
     # here we extract only one polygon of this shapefile
@@ -1487,7 +1507,7 @@ def stackGeoIms(geoims):
     stack different geoims into one
     return : a new geoim
     """
-    return geoims[0].stack(geoims[1:], inplace=False)
+    return geoims[0].stack(geoims[1:])
 
 def mergeDs(ls_ds, proj = None):
     """
@@ -1523,7 +1543,7 @@ def mergeGeoIms(geoims):
     """
     merge different GeoIm instancess
     """
-    return geoims[0].merge(geoims[1:], inplace=False)
+    return geoims[0].merge(geoims[1:])
 
 # def duration(func):
 #     """
