@@ -458,15 +458,15 @@ SCR name   : {self.getProjName()}""")
 
         return target
 
-    def resize(self, xRes, yRes, method="near", inplace=False):
+    def resize(self, xSize, ySize, method="near", inplace=False):
         """
         :descr:
             change the spatial size of the pixels, sometimes
             (wrongly) called "spatial resolution"
 
         :params:
-            xRes : float - the X pixel size
-            yRes : float - the Y pixel size
+            xSize : float - the X pixel size
+            ySize : float - the Y pixel size
             method : str - the resampling algorithm
                 default = "near"
                 type help(telenvi.raster_tools.resizeDs) to see
@@ -479,13 +479,13 @@ SCR name   : {self.getProjName()}""")
         
         """
 
-        res_ds = resizeDs(self.ds, xRes, yRes, method)
-        if inplace: 
+        res_ds = resizeDs(self.ds, xSize, ySize, method)
+        if inplace:
             self.ds = res_ds
             self._updateArray()
             return self
         else:
-            return res_ds
+            return GeoIm(res_ds)
 
     def stack(self, ls_geoim, inplace=False):
         """
@@ -929,7 +929,7 @@ def openGeoRaster(
 def openManyGeoRaster(
     directory,
     pattern,
-    endKeyPos,
+    endKeyPos = -4,
     crop = None,
     pol = 0,
     clip = None,
