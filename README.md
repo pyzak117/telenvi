@@ -23,7 +23,8 @@ from telenvi import raster_tools as rt
 ```
 
 ## How to
-check the https://github.com/pyzak117/telenvi/blob/main/tests_telenvi_3.0.0.ipynb jupyter notebook to see what the telenvi module has in store !
+check https://github.com/pyzak117/Tutorial-telenvi to see what the telenvi module has in store !
+You can also use the python help functionality to read the documentation of each function. 
 
 # Contact
 You can contact me at thibaut.duvanel@univ-savoie.fr if you have any questions :)

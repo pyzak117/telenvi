@@ -22,7 +22,6 @@ from PIL import Image, ImageEnhance
 import geopandas as gpd
 import shapely
 import re
-import __init__
 
 # Standard librairies
 import os
@@ -347,12 +346,6 @@ SCR name   : {self.getProjName()}""")
         # dans la fonction d'initialisation du nouveau GeoIm.
         else:
             return GeoIm(shiftedDs, array = self.array)
-
-    def splitBands(indexes):
-        ls_geoims = []
-        for index in indexes:
-            pass
-        pass
 
     def cropFromVector(self, vector, polygon=0, shift = False, inplace=False):
         """
