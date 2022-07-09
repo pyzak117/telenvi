@@ -205,6 +205,7 @@ class GeoIm:
             xRes, yRes = self.getPixelSize()
             orX, orY = self.getOriginPoint()
             crs = self.ds.GetProjection()
+
         else:
             orX, xRes, orY, yRes, crs = geodata
 
@@ -265,19 +266,13 @@ SCR name   : {self.getProjName()}""")
         """
         send the spatial coordinates reference system epsg id
         """
-        sp_ref = osr.SpatialReference(wkt = self.ds.GetProjection())
-        json_proj = json.loads(sp_ref.ExportToPROJJSON())
-        epsg = json_proj["id"]["code"]
-        return int(epsg)
-    
+        return getDsEpsg(self.ds)
+
     def getProjName(self):
         """
         send the spatial coordinates reference system name
         """
-        sp_ref = osr.SpatialReference(wkt = self.ds.GetProjection())
-        json_proj = json.loads(sp_ref.ExportToPROJJSON())
-        projName = json_proj["name"]
-        return projName
+        return getDsProjName(self.ds)
 
     def getOriginPoint(self):
         """
@@ -797,7 +792,7 @@ def openGeoRaster(
     resMethod = "near",
     ar_encoding = np.float32,
     ds_encoding = gdalconst.GDT_Float32,
-    verbose = True,
+    verbose = False,
     ):
 
     """
@@ -850,7 +845,7 @@ def openGeoRaster(
                 a gdalconst.type for the GeoIm's dataset
             
             verbose: boolean
-                default : True
+                default : False
                 write informations about the geoim preparation
 
     :returns:
@@ -872,7 +867,6 @@ def openGeoRaster(
             master_ds = gdal.Open(clip)
 
         elif type(clip) == GeoIm:
-            print("type GeoIm")
             master_ds = clip.ds
     
         # Get input and clip resolutions
@@ -884,29 +878,28 @@ def openGeoRaster(
             res = master_resX
 
         # Then we make a special crop, by changing the origin coordinates
-        inDs = cropDsFromRaster(inDs, master_ds, shift = True)
+        inDs = cropDsFromRaster(inDs, master_ds, shift = True, verbose = verbose)
 
     # Crop
     if type(crop) == str:
-        if verbose: print("crop")
         if crop[-4:].lower() == ".shp":
-            inDs = cropDsFromVector(inDs, crop, polygon=pol)
+            inDs = cropDsFromVector(inDs, crop, polygon=pol, verbose = verbose)
         elif gdal.Open(crop) != None:
-            inDs = cropDsFromRaster(inDs, crop)
+            inDs = cropDsFromRaster(inDs, crop, verbose = verbose)
     
     elif type(crop) in [list, tuple]:
         # xMin, yMin, xMax, yMax
-        if verbose: print("crop")
+        if verbose: print(f"crop\n---\nxMin : {crop[0]}\nyMin : {crop[1]}\nxMax : {crop[2]}\nyMax : {crop[3]}\n---\n")
         inDs = cropDsFromIndex(inDs, crop)
 
     # Reprojection
     if epsg != None:
-        if verbose: print("change spatial projection")
+        if verbose: print(f"reprojection\n---\nin  : {getDsEpsg(inDs)}\nout : {epsg}\n---\n")
         inDs = reprojDs(inDs, epsg)
 
     # Resample
     if res != None:
-        if verbose: print("change the pixels spatial size")
+        if verbose: print(f"resample\n---\nin     : {getDsPixelSize(inDs)[0]}\nout    : {res}\nmethod : {resMethod}\n---\n")
         inDs = resizeDs(inDs, xRes=res, yRes=res, resMethod=resMethod)
     
     # Extract interest band
@@ -916,7 +909,7 @@ def openGeoRaster(
 
     geoim = GeoIm(inDs, ds_encoding = ds_encoding, array_encoding = ar_encoding)
     
-    if verbose: print(f"geoim from file {os.path.basename(rasterPath)} ready")
+    print(f"geoim from file {os.path.basename(rasterPath)} ready")
     return geoim
 
 def openManyGeoRaster(
@@ -932,7 +925,7 @@ def openManyGeoRaster(
     resMethod = "near",
     ar_encoding = np.float32,
     ds_encoding = gdalconst.GDT_Float32,
-    verbose = True
+    verbose = False
     ):
 
     # Compile pattern with regular expression
@@ -1038,7 +1031,7 @@ def getDsCoordsExtent(ds):
     yMin = yMax + yRes * nRows
     return xMin, yMin, xMax, yMax
 
-def getDsProjection(ds):
+def getDsWKTProjection(ds):
     """
     ds : osgeo.gdal.Dataset or str
         if str, convert into osgeo.gdal.Dataset with gdal.Open()
@@ -1047,6 +1040,8 @@ def getDsProjection(ds):
     """    
     if type(ds) == str:
         ds = gdal.Open(ds)
+
+    return ds.GetProjection()
 
 def getDsOrIndexGeomExtent(ds = None, coords = None, mode="OGR"):
     """
@@ -1180,7 +1175,7 @@ def getDsArrayIndexesFromSpatialExtent(ds, BxMin, ByMin, BxMax, ByMax):
 
     return row1, col1, row2, col2
 
-def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, shift = False):
+def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32, shift = False, verbose = False):
     """
     :descr:
         cut the image according to a vector geometry
@@ -1219,6 +1214,9 @@ def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gd
     xMin, yMin, xMax, yMax = vector.bounds
     row1, col1, row2, col2 = getDsArrayIndexesFromSpatialExtent(ds, xMin, yMin, xMax, yMax)
 
+    # inform user
+    if verbose: print(f"crop\n---\nxMin : {xMin}\nyMin : {yMin}\nxMax : {xMax}\nyMax : {yMax}\n---\n")
+
     # Crop the array
     custom_array = ds.ReadAsArray(col1, row1, col2-col1, row2-row1).astype(ar_encoding)
 
@@ -1243,7 +1241,7 @@ def cropDsFromVector(ds, vector, polygon=0, geoim_mode = False, ds_encoding = gd
     # Create a new dataset with the array cropped
     return makeDs("", custom_array, custom_orX, xRes, custom_orY, yRes, crs, "MEM", ds_encoding)
 
-def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False, shift = False):
+def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False, shift = False, verbose = False):
     """
     :descr:
         cut the image according to another raster extent
@@ -1278,7 +1276,7 @@ def cropDsFromRaster(slave_ds, master_ds, geoim_mode = False, shift = False):
     inter_extent = slave_extent.intersection(master_extent)
 
     # Get data on the intersection area
-    return cropDsFromVector(slave_ds, inter_extent, geoim_mode=geoim_mode, shift = shift)
+    return cropDsFromVector(slave_ds, inter_extent, geoim_mode=geoim_mode, shift = shift, verbose = verbose)
 
 def cropDsFromIndex(ds, index, ds_encoding = gdalconst.GDT_Float32, ar_encoding = np.float32):
     """
@@ -1537,6 +1535,24 @@ def mergeGeoIms(geoims):
     merge different GeoIm instancess
     """
     return geoims[0].merge(geoims[1:])
+
+def getDsEpsg(ds):
+    """
+    send the spatial coordinates reference system epsg id
+    """
+    sp_ref = osr.SpatialReference(wkt = ds.GetProjection())
+    json_proj = json.loads(sp_ref.ExportToPROJJSON())
+    epsg = json_proj["id"]["code"]
+    return int(epsg)
+
+def getDsProjName(ds):
+    """
+    send the spatial coordinates reference system name
+    """
+    sp_ref = osr.SpatialReference(wkt = ds.GetProjection())
+    json_proj = json.loads(sp_ref.ExportToPROJJSON())
+    projName = json_proj["name"]
+    return projName
 
 # def duration(func):
 #     """
