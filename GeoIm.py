@@ -312,6 +312,8 @@ array type : {self.array.dtype}""")
         # Change the instance's array into masked_array
         self.array = ma.masked_array(data = self.array, mask = b)
 
+        return self.array
+
     def maskFromVector(self, area, inside=True, condition="", epsg=None):
         """
         change the instance array into masked_array.
@@ -398,7 +400,24 @@ array type : {self.array.dtype}""")
 
         self.array = ma.masked_array(data = self.array, mask = mask)
 
-        return None
+        return self.array
+
+    def maskZeros(self):
+        """
+        change the instance array into masked_array.
+        
+        - PARAMETERS -
+        value : float or int - the array value to mask
+
+        - RETURNS -
+        masked_array : numpy.ma.masked_array - an array of 2 dimensions.
+        the first array is the normal array
+        the second is a binary array representing the mask. 
+        0 : mask is unactive
+        1 : mask is active        
+        """
+        self.array = ma.masked_where(self.array == 0, self.array)
+        return self.array
 
     def unmask(self):
         """
@@ -476,7 +495,7 @@ array type : {self.array.dtype}""")
 
             return bands
 
-    def show(self, index=None, band=0, colors="viridis"):
+    def show(self, index=None, band=0, colors="viridis", bar=True):
 
         """
         :descr:
@@ -509,6 +528,9 @@ array type : {self.array.dtype}""")
 
         else:
             plt.imshow(self.array[row1:row2, col1:col2], cmap=colors)
+
+        if bar:
+            plt.colorbar()
 
         plt.show()
         plt.close()
