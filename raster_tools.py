@@ -12,6 +12,8 @@ import telenvi.GeoIm as GeoIm
 # Standard libraries
 import os
 import json
+import pathlib
+
 # import argparse
 
 # Data libraries
@@ -19,7 +21,8 @@ import numpy as np
 
 # Geo libraries
 import shapely
-import richdem as rd
+
+# import richdem as rd
 import geopandas as gpd
 from osgeo import gdal, gdalconst, osr, ogr
 
@@ -40,6 +43,9 @@ def getDs(target):
         ds = target
         if ds == None:
             raise ValueError("the target file is not a valid geo raster")
+
+    elif type(target) == pathlib.PosixPath:
+        ds = gdal.Open(str(target))
 
     elif target == None:
         return None
@@ -93,7 +99,7 @@ def getShape(target):
 
     send a tuple (numBands, numRows, numCols)
     """
-    if type(target) in [np.ndarray, rd.rdarray]:
+    if type(target) in [np.ndarray]:
         try :
             nBands, nRows, nCols = target.shape
         except ValueError:
@@ -200,6 +206,38 @@ def checkRasterValidity(target):
     """
     pass
 
+def spaceCoord_to_arrayCoord(point, ds):
+    """
+    send matrixian coordinates of a point
+
+    - PARAMETERS - 
+    point     : (x, y)
+    ds        : str - a path to a raster file 
+                osgeo.gdal.Dataset - a raster file represented by a gdal.Dataset
+
+    - RETURNS -
+    a tuple (row, col)
+    """
+    ds = getDs(ds)
+
+    # Unpack the point
+    if type(point) in (tuple, list):
+        pX, pY = point
+    elif type(point) == shapely.geometry.point.Point:
+        pX, pY = point.x, point.y
+
+    # Get image origin point
+    imOrX, imOrY = getOrigin(ds)
+
+    # Get image resolution
+    xRes, yRes = getPixelSize(ds)
+
+    # Find the xRow
+    row = abs(int((pY - imOrY)) / xRes)
+    col = abs(int((pX - imOrX)) / yRes)
+
+    return (int(row), int(col))
+    
 def spaceBox_to_arrayBox(geoBounds, ds, array = None):
     """
     send matrixian coordinates of a portion of the space
@@ -216,7 +254,7 @@ def spaceBox_to_arrayBox(geoBounds, ds, array = None):
     """
 
     ds = getDs(ds)
-    if type(array) not in [np.ndarray, rd.rdarray]:
+    if type(array) not in [np.ndarray]:
         array = ds.ReadAsArray()
 
     # Get initial image resolution
@@ -552,12 +590,15 @@ def merge(targets, outpath=""):
         an osgeo.gdal.Dataset
     """
 
-    driverName = getDriverNameFromPath(outpath)
-
+    # Merge datasets
     new_ds = gdal.Warp(
-        destNameOrDestDS=outpath,
-        srcDSOrSrcDSTab=targets,
-        format=driverName)
+        destNameOrDestDS='',
+        srcDSOrSrcDSTab=[getDs(t) for t in targets],
+        format='MEM')
+
+    # Save the merged dataset in a raster file
+    if outpath != "":
+        write(new_ds, outpath)
 
     return new_ds
 
@@ -817,5 +858,3 @@ def pre_process(
 # 
 #     # There is a lot of work to do here
 #     # To use this toolbox from command line
-
-# %%

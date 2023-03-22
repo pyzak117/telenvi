@@ -1,9 +1,11 @@
 """
 telenvi
 -------
-Version = '1.2.3'
-2022-08-23 17:04:05
+Version = '4.1.2'
+2023-03-22 22:10:55
 """
 
-VERSION = '1.2.3'
-print("---------\ntelenvi package " + str(VERSION) + "\n---------")
+VERSION = '4.1.2'
+print(f"""---------
+telenvi {VERSION}
+---------""")

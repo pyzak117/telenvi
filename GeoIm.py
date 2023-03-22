@@ -19,7 +19,8 @@ from matplotlib import pyplot as plt
 
 # Geo libraries
 import shapely
-import richdem as rd
+
+# import richdem as rd
 import geopandas as gpd
 from geocube.api.core import make_geocube
 
@@ -30,11 +31,11 @@ class GeoIm:
 
     def __init__(self, target, array=None):
 
-        if type(array) not in [np.ndarray, rd.rdarray] :
+        if type(array) not in [np.ndarray] :
             self.ds = rt.getDs(target)
             self._array = self.ds.ReadAsArray()
 
-        elif type(array) in [np.ndarray, rd.rdarray]:
+        elif type(array) in [np.ndarray]:
             ds = rt.getDs(target)
 
             # First we check dataset and array compatibility
@@ -73,7 +74,7 @@ class GeoIm:
             newArray.data[newArray.mask == True] = self.mask_value
             newArray = newArray.data
 
-        elif type(newArray) in [np.ndarray, rd.rdarray]:
+        elif type(newArray) in [np.ndarray]:
             self._array = np.copy(newArray)
 
         # In both cases, we can now update the Dataset with the new array
@@ -83,7 +84,7 @@ class GeoIm:
 
     def updateDs(self, newArray=None):
 
-        if type(newArray) not in [np.ndarray, rd.rdarray]:
+        if type(newArray) not in [np.ndarray]:
             newArray = self.array
 
         new_ds = rt.create(
@@ -198,7 +199,7 @@ array type : {self.array.dtype}""")
         vector : shapely.geometry.polygon.Polygon or str - path to a shapefile
         polygon : id of the feature, if vector is a shapefile
         """
-
+        print(type(vector))
         # We get the polygon geo extent
         if type(vector) == str:
             layer = gpd.read_file(vector)
@@ -210,7 +211,7 @@ array type : {self.array.dtype}""")
         elif type(vector) == tuple:
             bounds = vector
 
-        elif type(vector) == shapely.geometry.polygon.Polygon:
+        elif type(vector) in (shapely.geometry.polygon.Polygon, shapely.geometry.multipolygon.MultiPolygon):
             bounds = vector.bounds
 
         # And we cut the geoim on it
@@ -232,7 +233,7 @@ array type : {self.array.dtype}""")
         # And we cut the geoim on it
         return self.cropFromIndexes(crop_indexes, verbose = verbose, inplace = inplace)
 
-    def cropFromIndexes(self, indexes, inplace=False):
+    def cropFromIndexes(self, indexes, inplace=False, verbose = False):
         """
         indexes : tuple - (row1, col1, row2, col2)
         """        
@@ -314,23 +315,20 @@ array type : {self.array.dtype}""")
 
         return self.array
 
-    def maskFromVector(self, area, inside=True, condition="", epsg=None):
+    def maskFromVector(self, vector, inside=True, verbose=False, epsg=2154):
         """
         change the instance array into masked_array.
-        According to the 'inside' argument, the masked areas 
-        are either inside or outside the shapefile outlines.
+        According to the 'inside' argument, the masked vectors 
+        are either inside or outside the vector outlines.
         
         - PARAMETERS -
-        area : str or a geopandas.GeoDataFrame
+        vector : str or a geopandas.GeoDataFrame or geopandas.GeoSeries or pandas.Series
         a shapefile containing one or many geometric objects
 
         inside : boolean - describe if the data to keep unmasked 
-        is inside (True) or outside (False) the area outlines.
+        is inside (True) or outside (False) the vector outlines.
 
-        condition : str
-        a string describing an attributary condition to select only few 
-        feature of the area shapefile. It must be structured as follow :
-            'column columnName values [possibleValue1, possibleValueN] --- column columnName values [possibleValue1, possibleValueN]'
+        verbose : boolean - to see how many features intersect the GeoIm
 
         - RETURNS -
         masked_array : numpy.ma.masked_array - an array of 2 dimensions.
@@ -340,41 +338,44 @@ array type : {self.array.dtype}""")
         1 : mask is active
         """
 
-        if epsg == None:
-            epsg = self.getEpsg()
-
         # Get a GeoDataFrame from a geofile path
-        area_name = ""
-        if type(area) == str:
-            area_name = os.path.basename(area)
-            area = gpd.read_file(area)
+        vector_name = ""
+        if type(vector) == str:
+            vector_name = os.path.basename(vector)
+            vector = gpd.read_file(vector)
 
         # Or from a GeoSerie
-        elif type(area) in (gpd.GeoSeries, pd.core.series.Series):
-            area = gpd.GeoDataFrame([area])
+        elif type(vector) in (gpd.GeoSeries, pd.core.series.Series):
+            vector = gpd.GeoDataFrame([vector])
+
+        elif type(vector) in (shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon):
+            vector = gpd.GeoDataFrame([{'geometry':vector}]).set_crs(epsg=epsg)
 
         # Then set is crs to be the same than the geoim
-        area.set_crs(epsg=epsg, allow_override=True, inplace=True)
+        # vector.set_crs(epsg=epsg, allow_override=True, inplace=True)
+        # This line raise a warning
 
-        # Select the features intersecting the instance geom extent
-        area = area[area["geometry"].intersects(self.drawGeomExtent(geomType="shly")) == True].copy()
+        # Find the vector epsg
+        epsg = vector.crs.to_epsg()
 
-        if area_name != "":
-            print(f"{area_name} : {len(area)} polygon intersecting the geoim")
-        if len(area) == 0:
+        # Select the features intersecting the image geo-extent
+        vector = vector[vector["geometry"].intersects(self.drawGeomExtent(geomType="shly")) == True].copy()
+        if verbose and vector_name != "":
+            print(f"{vector_name} : {len(vector)} polygon intersecting the geoim")
+        if len(vector) == 0:
             return None
 
-        # Affect a value to the pixels inside the shapefile features outlines
+        # Affect a value to the pixels inside the vector features outlines
         if inside :
-            area["rValue"] = 0
+            vector["rValue"] = 0
         else:
-            area["rValue"] = 1
+            vector["rValue"] = 1
 
         geomjson = self.drawGeomExtent().ExportToJson()[:-1] + ', "crs": {"properties": {"name": "EPSG:' + str(epsg) + '"}}}'
 
         # Rasterization
         mask = make_geocube(
-            area,
+            vector,
             measurements=["rValue"],
             geom = geomjson,
             resolution = self.getPixelSize()[0])
@@ -399,7 +400,6 @@ array type : {self.array.dtype}""")
             mask = np.array([o])
 
         self.array = ma.masked_array(data = self.array, mask = mask)
-
         return self.array
 
     def maskZeros(self):
@@ -432,7 +432,7 @@ array type : {self.array.dtype}""")
         The argument 'band' is refering to matrixian indexes, so the
         band 1 have the index 0.
         """
-        if type(self.array) in [np.ndarray, rd.rdarray]:
+        if type(self.array) in [np.ndarray]:
             return np.median(self.array)
         elif type(self.array) == ma.core.MaskedArray:
             return ma.median(self.array)
@@ -443,7 +443,7 @@ array type : {self.array.dtype}""")
         The argument 'band' is refering to matrixian indexes, so the
         band 1 have the index 0.
         """
-        if type(self.array) in [np.ndarray, rd.rdarray] :
+        if type(self.array) in [np.ndarray] :
             return np.mean(self.array)
         elif type(self.array) == ma.core.MaskedArray:
             return ma.mean(self.array)
@@ -636,3 +636,86 @@ array type : {self.array.dtype}""")
 
         # Return PIL.Image instance
         return rgb
+
+    def getCentroids(self):
+        pX, pY = self.getPixelSize()
+        _, nRows, nCols = self.getShape()
+        orX, orY = self.getOrigin()
+        centroids=[]
+        for row in range(nRows):
+            for col in range(nCols):
+                x = orX + (col * pX)
+                y = orY + (row * pY)
+                centroids.append((x,y))
+        return centroids
+
+    def getPointValue(self, point):
+        row, col = rt.spaceCoord_to_arrayCoord(point, self)
+        if self.getShape()[0] > 1:
+            values = []
+            for band in self.array:
+                values.append(band[row][col])
+            return values
+        else:
+            return self.array[row][col]
+
+    def getProfile(self, start, end):
+        # Prélevement au point de départ
+        # Puis on incrémente la position 
+
+        # Puis sur les centroïdes de chaque pixel entre start et end
+
+        pass
+
+    def getStatsInVector(self, vector):
+        """
+        return values of the pixels contained in the vector
+        """
+
+        # Extract vector shapely geometry
+        if type(vector) == gpd.GeoDataFrame:
+            geom = vector.iloc[0].geometry
+        elif type(vector) in [gpd.GeoSeries, pd.Series]:
+            geom = vector.geometry
+
+        # Define intervals between points
+        xGap = self.getPixelSize()[0]
+        yGap = self.getPixelSize()[0]
+
+        # Create a grid of points inside the polygon
+        x_min, y_min, x_max, y_max = geom.bounds
+        x_points = np.arange(x_min, x_max, xGap)
+        y_points = np.arange(y_min, y_max, yGap)
+        points = np.array(np.meshgrid(x_points, y_points)).T.reshape(-1,2)
+        
+        # Filter the points contained in the polygon
+        if 'line' in geom.geom_type.lower():
+            points = [shapely.geometry.Point(point) for point in points]
+        else:
+            points = [shapely.geometry.Point(point) for point in points if geom.contains(shapely.geometry.Point(point))]
+
+        # Extract values for each point
+        values = [self.getPointValue((p.x, p.y)) for p in points]
+
+        return values
+
+"""
+import numpy as np
+
+# Définissez les intervalles x et y
+x_interval = 2
+y_interval = 2
+
+# Créez une grille de points avec NumPy
+x_min, y_min, x_max, y_max = polygon.bounds
+x_points = np.arange(x_min, x_max, x_interval)
+y_points = np.arange(y_min, y_max, y_interval)
+points = np.array(np.meshgrid(x_points, y_points)).T.reshape(-1, 2)
+
+# Filtrez les points qui sont contenus dans le polygone
+points = [shapely.geometry.Point(point) for point in points if polygon.contains(shapely.geometry.Point(point))]
+
+# Affichez les points de la grille
+for point in points:
+    print(point)
+"""
