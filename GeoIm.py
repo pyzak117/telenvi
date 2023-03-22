@@ -271,22 +271,16 @@ array type : {self.array.dtype}""")
 
     def maskFromThreshold(self, threshold, greater = True, opening_kernel_size = None):
         """
-        change the instance array into masked_array according to a 
-        threshold apply on the array instance values
+        Change the instance array into numpy.ma.masked_array according to a threshold apply on the array instance values.
 
-        - PARAMETERS -
-        threshold : float - each value of the array is compared to this threshold
-        greater  : boolean - if True, the valids pixels have them with a greater 
-        value than the threshold. If False, it's the pixels with a lower value than
-        the threshold.
+        Args:
+            threshold (float): each value of the array is compared to this threshold.
+            greater (bool, optional): if True, the valid pixels have them with a greater value than the threshold. If False, it's the pixels with a lower value than the threshold. Defaults: True.
+            opening_kernel_size (float, optional): kernel size which is used to reduce small and isolated pixels. Defaults to None.
 
-        - RETURNS -
-        masked_array : numpy.ma.masked_array - an array of 2 dimensions.
-        the first array is the normal array
-        the second is a binary array representing the mask. 
-        0 : mask is unactive
-        1 : mask is active
-        """  
+        Returns:
+            numpy.ma.masked_array: a 2 band array. First band is the data itself and the second one is a binary array representing the mask. 0 : mask is unactive; 1 : mask is active
+        """
 
         # 0 : MASK IS UNACTIVE - DATA IS TO SEE
         # 1 : MASK IS ACTIVE   - DATA IS TO MASK
