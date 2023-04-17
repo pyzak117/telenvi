@@ -7,6 +7,7 @@ data from this array, with geo attributes under the hand
 
 # telenvi modules
 import telenvi.raster_tools as rt
+import telenvi.vector_tools as vt
 
 # Standard libraries
 import os
@@ -199,7 +200,7 @@ array type : {self.array.dtype}""")
         vector : shapely.geometry.polygon.Polygon or str - path to a shapefile
         polygon : id of the feature, if vector is a shapefile
         """
-        print(type(vector))
+        
         # We get the polygon geo extent
         if type(vector) == str:
             layer = gpd.read_file(vector)
@@ -643,8 +644,15 @@ array type : {self.array.dtype}""")
                 centroids.append((x,y))
         return centroids
 
-    def getPointValue(self, point):
-        row, col = rt.spaceCoord_to_arrayCoord(point, self)
+    def inspectGeoPoint(self, geoPoint):
+        """
+        extract the pixel(s) values under a geoPoint
+        """
+
+        # Get Matrixian coordinates of the geographic point
+        row, col = rt.spaceCoord_to_arrayCoord(geoPoint, self)
+
+        # Just a block to process GeoIm with many bands
         if self.getShape()[0] > 1:
             values = []
             for band in self.array:
@@ -653,63 +661,44 @@ array type : {self.array.dtype}""")
         else:
             return self.array[row][col]
 
-    def getProfile(self, start, end):
-        # Prélevement au point de départ
-        # Puis on incrémente la position 
-
-        # Puis sur les centroïdes de chaque pixel entre start et end
-
-        pass
-
-    def getStatsInVector(self, vector):
+    def inspectGeoLine(self, geoLine):
         """
-        return values of the pixels contained in the vector
+        extract the pixels values under a geoLine
         """
 
-        # Extract vector shapely geometry
-        if type(vector) == gpd.GeoDataFrame:
-            geom = vector.iloc[0].geometry
-        elif type(vector) in [gpd.GeoSeries, pd.Series]:
-            geom = vector.geometry
+        # Create a point on each pixel along the line
+        geoPoints = vt.getGeoPointsAlongGeoLine(geoLine, self.getPixelSize()[0])
+
+        # Extract pixel values on each point
+        values = [self.inspectGeoPoint(p) for p in geoPoints]
+        return values
+
+    def inspectGeoPolygon(self, geoPolygon):
+        """
+        extract pixels values contained in the geoPolygon
+        """
 
         # Define intervals between points
         xGap = self.getPixelSize()[0]
         yGap = self.getPixelSize()[0]
 
-        # Create a grid of points inside the polygon
-        x_min, y_min, x_max, y_max = geom.bounds
-        x_points = np.arange(x_min, x_max, xGap)
-        y_points = np.arange(y_min, y_max, yGap)
-        points = np.array(np.meshgrid(x_points, y_points)).T.reshape(-1,2)
-        
-        # Filter the points contained in the polygon
-        if 'line' in geom.geom_type.lower():
-            points = [shapely.geometry.Point(point) for point in points]
-        else:
-            points = [shapely.geometry.Point(point) for point in points if geom.contains(shapely.geometry.Point(point))]
-
-        # Extract values for each point
-        values = [self.getPointValue((p.x, p.y)) for p in points]
-
+        # Get the pixels values inside the polygon
+        geoPoints = vt.getGridInGeoPolygon(geoPolygon, xGap, yGap)
+        values = [self.inspectGeoPoint((p.x, p.y)) for p in geoPoints]
         return values
 
-"""
-import numpy as np
+    def inspectRibsAlongSpine(self, spine, ribLength, ribStep, ribOrientation='v'):
+        """
+        extract pixels values along 
+        multiple perpendicular lines (ribs)
+        regularly sampled along another line (the spine)  
+        """
 
-# Définissez les intervalles x et y
-x_interval = 2
-y_interval = 2
+        # Get the ribs
+        ribs = vt.serializeGeoLines(spine, ribLength, ribStep, ribOrientation)
 
-# Créez une grille de points avec NumPy
-x_min, y_min, x_max, y_max = polygon.bounds
-x_points = np.arange(x_min, x_max, x_interval)
-y_points = np.arange(y_min, y_max, y_interval)
-points = np.array(np.meshgrid(x_points, y_points)).T.reshape(-1, 2)
+        # And now, extract pixels values along each rib
+        values = [self.inspectGeoLine(rib) for rib in ribs]
+        return values
 
-# Filtrez les points qui sont contenus dans le polygone
-points = [shapely.geometry.Point(point) for point in points if polygon.contains(shapely.geometry.Point(point))]
-
-# Affichez les points de la grille
-for point in points:
-    print(point)
-"""
+# %%
