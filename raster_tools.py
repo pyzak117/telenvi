@@ -13,14 +13,18 @@ import telenvi.GeoIm as GeoIm
 import os
 import json
 import pathlib
+import warnings
 
-# import argparse
+# CLI libraries
+from tqdm import tqdm
 
 # Data libraries
 import numpy as np
+import pandas as pd
 
 # Geo libraries
 import shapely
+from shapely.errors import ShapelyDeprecationWarning
 
 # import richdem as rd
 import geopandas as gpd
@@ -574,7 +578,7 @@ def stack(targets, outpath=""):
      - RETURNS -
         an osgeo.gdal.Dataset
     """
-
+    targets = [getDs(t) for t in targets]
     new_ds = gdal.BuildVRT(outpath, targets, separate = True)
     return new_ds
 
@@ -693,6 +697,60 @@ def write(target, outpath, ndValue=None):
     else:
         print(f"error during {os.path.basename(outpath)} creation")
         return False    
+
+def vectorize(target):
+    target = GeoIm.GeoIm(target)
+
+    # extract raster metadata
+    x_origin, y_origin = getOrigin(target)
+    x_pixel_size, y_pixel_size = getPixelSize(target)
+    nBands, nCols, nRows = getShape(target)
+
+    # Create coordinate arrays
+    x_coords = np.arange(
+        start= x_origin, 
+        stop = x_origin + x_pixel_size * nRows,
+        step = x_pixel_size)
+
+    y_coords = np.arange(
+        start= y_origin, 
+        stop = y_origin + y_pixel_size * nCols,
+        step = y_pixel_size)
+
+    # A 3 dimensionals arrays. We use it like coords[:, posY, posX]
+    coords = np.array(np.meshgrid(x_coords, y_coords))
+
+    # Make a list with each 2D arrays of the images - if multispectral
+    if nBands > 1:
+        values = [target.array[band] for band in range(0,nBands)]
+    else:
+        values = [target.array]
+
+    # Build a 3D array with X and Y coordinates of each pixel + their values
+    combo = np.array(values + [coords[1], coords[0]])
+
+    # Reverse it. Now, combo[posX][poxY] return at least 3 values : b1, b2... bn, coordx, coordy
+    combo = combo.T
+    
+    # Build a list of DataFrames, one for each row because pd.DataFrame(array) must be used with 2D array
+    protoVectorLayer = []
+    for row in tqdm(range(nRows)):
+        rowDf = pd.DataFrame(combo[row], columns = [f"b{nBand}" for nBand in range(nBands)] + ['cy','cx'])
+
+        # Add geometry column with shapely
+        with warnings.catch_warnings(): # Avoid inunderstandable shapely depreciation warning
+            warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
+            rowDf['geometry'] = rowDf.apply(lambda row: shapely.geometry.Point(row.cx, row.cy), axis=1)
+
+        # Drop useless columns
+        rowDf = rowDf.drop(['cx', 'cy'], axis=1)
+
+        protoVectorLayer.append(rowDf)
+
+    # Concat all the row DataFrames into one
+    vectorLayer = gpd.GeoDataFrame(pd.concat(protoVectorLayer, ignore_index=True))
+
+    return vectorLayer
 
 def cropFromIndexes(target, indexes):
 
