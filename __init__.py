@@ -1,6 +1,5 @@
-"""
-telenvi
--------
-Version = '5.0.9'
-2023-05-09 16:44:11
-"""
+version = 'developer version'
+
+print(f'''-------------
+telenvi {version}
+-------------''')
