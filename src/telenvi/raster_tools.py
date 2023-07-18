@@ -24,6 +24,7 @@ import pandas as pd
 
 # Geo libraries
 import shapely
+import rasterio
 from shapely.errors import ShapelyDeprecationWarning
 
 # import richdem as rd
@@ -36,7 +37,10 @@ from osgeo import gdal, gdalconst, osr, ogr
 # --------------
 """
 
-def getDs(target):
+def getDs(target, mode=''):
+
+    if mode == 'rasterio':
+        return rasterio.open(target)
 
     if type(target) == str:
         if not os.path.exists(target):
@@ -56,7 +60,7 @@ def getDs(target):
 
     else: # It can be a GeoIm
         ds = target.ds
-    
+
     return ds
 
 def getOrigin(target):
@@ -184,25 +188,21 @@ def getWktFromEpsg(wktProj):
     wktcrs=srs.ExportToWkt()
     return wktcrs
 
-def getEpsg(target):
+def getCrsEpsg(target):
     """
+    for the moment, target must be a path and only a path
     send the target spatial coordinates reference system epsg id
     """
-    json_proj = getJsonProj(target)
-    try:
-        return int(json_proj["base_crs"]["id"]["code"])
-    except KeyError:
-        return 0
+    target = getDs(target, mode='rasterio')
+    return target.crs.to_epsg()
 
-def getProjName(target):
+def getCrsWkt(target):
     """
-    send the target spatial coordinates reference system name
+    for the moment, target must be a path and only a path
+    send the target spatial coordinates reference string
     """
-    json_proj = getJsonProj(target)
-    try:
-        return json_proj["name"]
-    except KeyError:
-        return "unknown"
+    target = getDs(target, mode='rasterio')
+    return target.crs.to_wkt()
 
 def checkRasterValidity(target):
     """
@@ -606,6 +606,36 @@ def merge(targets, outpath=""):
 
     return new_ds
 
+def assign_crs(target, epsg, outpath=""):
+    """
+    just assign a new crs to the target. 
+    WARNING : It's NOT a reprojection. It's just a assignment.
+
+    - PARAMETERS - 
+    target : str - a path to a raster file 
+             osgeo.gdal.Dataset - a raster file represented by a gdal.Dataset
+
+     - RETURNS -
+        an osgeo.gdal.Dataset
+    """
+
+    # Extract data from the target
+    t = GeoIm.GeoIm(getDs(target))
+    orX, orY = t.getOrigin()
+    psx, psy = t.getPixelSize()
+    
+    # Build a new dataset
+    new_ds = create(
+        t.array,
+        outpath,
+        orX,
+        orY,
+        psx,
+        psy,
+        epsg)
+
+    return new_ds
+
 def create(
     array,
     path = "",
@@ -855,7 +885,7 @@ def pre_process(
 
     # Reprojection
     if epsg != None:
-        if verbose: print(f"reprojection\n---\nin  : {getEpsg(inDs)}\nout : {epsg}\n---\n")
+        if verbose: print(f"reprojection\n---\nin  : {getCrsEpsg(target)}\nout : {epsg}\n---\n")
         inDs=reproj(inDs, epsg)
 
     def _geoCrop(inDs, geoExtent, featureNum, verbose):

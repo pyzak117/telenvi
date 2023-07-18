@@ -151,8 +151,7 @@ origin     : {self.getOrigin()}
 bands      : {self.getShape()[0]}
 rows       : {self.getShape()[1]}
 columns    : {self.getShape()[2]}
-SCR epsg   : {self.getEpsg()}
-SCR name   : {self.getProjName()}
+SCR epsg   : {self.getCrsEpsg()}
 array type : {self.array.dtype}""")
         return ""
 
@@ -174,12 +173,9 @@ array type : {self.array.dtype}""")
     def drawGeomExtent(self, geomType="ogr"):
         return rt.drawGeomExtent(self.ds, geomType)
     
-    def getEpsg(self):
-        return rt.getEpsg(self.ds)
-    
-    def getProjName(self):
-        return rt.getProjName(self.ds)
-    
+    def getCrsEpsg(self):
+        return rt.getCrsEpsg(self.ds.GetDescription())
+        
     def getJsonProj(self):
         return rt.getJsonProj(self.ds)
 
@@ -268,7 +264,7 @@ array type : {self.array.dtype}""")
         if inplace: 
             self = target
         
-        return target        
+        return target
 
     def maskFromThreshold(self, threshold, greater = True, opening_kernel_size = None):
         """
@@ -310,7 +306,7 @@ array type : {self.array.dtype}""")
 
         return self.array
 
-    def maskFromVector(self, vector, inside=True, verbose=False, epsg=2154):
+    def maskFromVector(self, vector, epsg, inside=True, verbose=False):
         """
         change the instance array into masked_array.
         According to the 'inside' argument, the masked vectors 
@@ -700,5 +696,8 @@ array type : {self.array.dtype}""")
         # And now, extract pixels values along each rib
         values = [self.inspectGeoLine(rib) for rib in ribs]
         return values
+
+    def vectorize(self):
+        return rt.vectorize(self.ds)
 
 # %%
