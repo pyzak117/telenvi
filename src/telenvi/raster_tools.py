@@ -25,6 +25,7 @@ import pandas as pd
 # Geo libraries
 import shapely
 import rasterio
+from rasterio.features import shapes
 from shapely.errors import ShapelyDeprecationWarning
 
 # import richdem as rd
@@ -728,59 +729,80 @@ def write(target, outpath, ndValue=None):
         print(f"error during {os.path.basename(outpath)} creation")
         return False    
 
-def vectorize(target):
+def vectorize(target, mode='points'):
+
+    # Read the target
     target = geoim.Geoim(target)
 
-    # extract raster metadata
-    x_origin, y_origin = getOrigin(target)
-    x_pixel_size, y_pixel_size = getPixelSize(target)
-    nBands, nCols, nRows = getShape(target)
+    if mode == 'points':
 
-    # Create coordinate arrays
-    x_coords = np.arange(
-        start= x_origin, 
-        stop = x_origin + x_pixel_size * nRows,
-        step = x_pixel_size)
+        # extract raster metadata
+        x_origin, y_origin = getOrigin(target)
+        x_pixel_size, y_pixel_size = getPixelSize(target)
+        nBands, nCols, nRows = getShape(target)
 
-    y_coords = np.arange(
-        start= y_origin, 
-        stop = y_origin + y_pixel_size * nCols,
-        step = y_pixel_size)
+        # Create coordinate arrays
+        x_coords = np.arange(
+            start= x_origin, 
+            stop = x_origin + x_pixel_size * nRows,
+            step = x_pixel_size)
 
-    # A 3 dimensionals arrays. We use it like coords[:, posY, posX]
-    coords = np.array(np.meshgrid(x_coords, y_coords))
+        y_coords = np.arange(
+            start= y_origin, 
+            stop = y_origin + y_pixel_size * nCols,
+            step = y_pixel_size)
 
-    # Make a list with each 2D arrays of the images - if multispectral
-    if nBands > 1:
-        values = [target.array[band] for band in range(0,nBands)]
-    else:
-        values = [target.array]
+        # A 3 dimensionals arrays. We use it like coords[:, posY, posX]
+        coords = np.array(np.meshgrid(x_coords, y_coords))
 
-    # Build a 3D array with X and Y coordinates of each pixel + their values
-    combo = np.array(values + [coords[1], coords[0]])
+        # Make a list with each 2D arrays of the images - if multispectral
+        if nBands > 1:
+            values = [target.array[band] for band in range(0,nBands)]
+        else:
+            values = [target.array]
 
-    # Reverse it. Now, combo[posX][poxY] return at least 3 values : b1, b2... bn, coordx, coordy
-    combo = combo.T
-    
-    # Build a list of DataFrames, one for each row because pd.DataFrame(array) must be used with 2D array
-    protoVectorLayer = []
-    for row in tqdm(range(nRows)):
-        rowDf = pd.DataFrame(combo[row], columns = [f"b{nBand}" for nBand in range(nBands)] + ['cy','cx'])
+        # Build a 3D array with X and Y coordinates of each pixel + their values
+        combo = np.array(values + [coords[1], coords[0]])
 
-        # Add geometry column with shapely
-        with warnings.catch_warnings(): # Avoid inunderstandable shapely depreciation warning
-            warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
-            rowDf['geometry'] = rowDf.apply(lambda row: shapely.geometry.Point(row.cx, row.cy), axis=1)
+        # Reverse it. Now, combo[posX][poxY] return at least 3 values : b1, b2... bn, coordx, coordy
+        combo = combo.T
+        
+        # Build a list of DataFrames, one for each row because pd.DataFrame(array) must be used with 2D array
+        protoVectorLayer = []
+        for row in tqdm(range(nRows)):
+            rowDf = pd.DataFrame(combo[row], columns = [f"b{nBand}" for nBand in range(nBands)] + ['cy','cx'])
 
-        # Drop useless columns
-        rowDf = rowDf.drop(['cx', 'cy'], axis=1)
+            # Add geometry column with shapely
+            with warnings.catch_warnings(): # Avoid inunderstandable shapely depreciation warning
+                warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
+                rowDf['geometry'] = rowDf.apply(lambda row: shapely.geometry.Point(row.cx, row.cy), axis=1)
 
-        protoVectorLayer.append(rowDf)
+            # Drop useless columns
+            rowDf = rowDf.drop(['cx', 'cy'], axis=1)
 
-    # Concat all the row DataFrames into one
-    vectorLayer = gpd.GeoDataFrame(pd.concat(protoVectorLayer, ignore_index=True))
+            protoVectorLayer.append(rowDf)
+
+        # Concat all the row DataFrames into one
+        vectorLayer = gpd.GeoDataFrame(pd.concat(protoVectorLayer, ignore_index=True))
 
     return vectorLayer
+
+    """
+    elif mode == 'polygons':
+        
+        target = getRasterioDs(target)
+        with rasterio.Env():
+            with rasterio.open(str(Path(self.session.p_raster_data, self.pz_name, 'displacements', f"{self.pz_name}_moving-areas_{n_clusters}_{mode}.tif"))) as src:
+                image = src.read(1) # first band
+                results = (
+                {'properties': {'raster_val': v}, 'geometry': s}
+                for i, (s, v) 
+                in enumerate(
+                    shapes(image, mask=mask, transform=src.transform)))
+        geoms = list(results)
+        gpd_polygonized_raster = gpd.GeoDataFrame.from_features(geoms).set_crs(epsg=2154)
+        """
+
 
 def cropFromIndexes(target, indexes):
 
@@ -942,6 +964,12 @@ def Open(
         return geoim.Geoim(inDs)
     else:
         return inDs
+
+def getRasterioDs(target):
+    """
+    Send a rasterio dataset from a path or a gdal dataset
+    """
+    pass
 
 # if __name__ == "__main__":
 # 

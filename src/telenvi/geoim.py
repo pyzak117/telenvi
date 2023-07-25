@@ -1,3 +1,4 @@
+#%%
 module_description = """
 --- telenvi.Geoim ---
 Use Geoim objects to read only once a raster file array.
@@ -17,6 +18,10 @@ import numpy as np
 import pandas as pd
 import numpy.ma as ma
 from matplotlib import pyplot as plt
+from sklearn import cluster
+
+# Images processing libraries
+import cv2 as cv
 
 # Geo libraries
 import shapely
@@ -628,6 +633,56 @@ array type : {self.array.dtype}""")
         # Return PIL.Image instance
         return rgb
 
+    def morphochange(self, operator_size=10, mode='o'):
+
+        """
+        Apply a morphological change on the geoim
+        """
+
+        # Build a morphological operator
+        operator = np.ones((operator_size, operator_size))
+
+        # Convert the array
+        array = self.array.astype('uint8')
+
+        # Morphological operation
+        if mode.lower() == 'o':
+            new_array = cv.morphologyEx(array, cv.MORPH_OPEN, operator)
+        
+        elif mode.lower() == 'c':
+            new_array = cv.morphologyEx(array, cv.MORPH_CLOSE, operator)
+
+        # Set the array in a new geoim
+        new = Geoim(self.ds, new_array)
+        return new
+
+    def clusterize(self, n_clusters, n_init=10):
+
+        """
+        Apply a KMeans clusterization on the geoim
+        """
+
+        # Reshape the array for the clustering
+        target_array = self.array.reshape(-1,1)
+
+        # Create the classifier
+        k_means_classifier = cluster.KMeans(n_clusters=n_clusters, n_init=n_init)
+
+        # Fit to the data
+        k_means_classifier.fit(target_array)
+
+        # Get the labels
+        clusters_labels = k_means_classifier.labels_
+
+        # re-switch the classified vector as image (2D array)
+        clusterized_array = clusters_labels.reshape(self.array.shape)
+
+        # write the new array in a new geoim
+        clusterized = self.copy()
+        clusterized.array = clusterized_array
+
+        return clusterized
+
     def getCentroids(self):
         pX, pY = self.getPixelSize()
         _, nRows, nCols = self.getShape()
@@ -698,6 +753,4 @@ array type : {self.array.dtype}""")
         return values
 
     def vectorize(self):
-        return rt.vectorize(self.ds)
-
-# %%
+        return rt.vectorize(self.ds, mode)
