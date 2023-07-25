@@ -7,7 +7,7 @@ syntax.
 
 # telenvi modules
 from telenvi.associations import npdtype_gdalconst, extensions_drivers
-import telenvi.GeoIm as GeoIm
+import telenvi.geoim as geoim
 
 # Standard libraries
 import os
@@ -58,7 +58,7 @@ def getDs(target, mode=''):
     elif target == None:
         return None
 
-    else: # It can be a GeoIm
+    else: # It can be a geoim
         ds = target.ds
 
     return ds
@@ -620,7 +620,7 @@ def assign_crs(target, epsg, outpath=""):
     """
 
     # Extract data from the target
-    t = GeoIm.GeoIm(getDs(target))
+    t = geoim.Geoim(getDs(target))
     orX, orY = t.getOrigin()
     psx, psy = t.getPixelSize()
     
@@ -729,7 +729,7 @@ def write(target, outpath, ndValue=None):
         return False    
 
 def vectorize(target):
-    target = GeoIm.GeoIm(target)
+    target = geoim.Geoim(target)
 
     # extract raster metadata
     x_origin, y_origin = getOrigin(target)
@@ -817,25 +817,26 @@ def cropFromIndexes(target, indexes):
     
     return newDs, extraction
 
-def pre_process(
+def Open(
     target,
-    geoim=False,
-    nBands=None,
-    geoExtent=None,
-    arrExtent=None,
-    nRes=None,
-    epsg=None,
-    clip=None,
-    featureNum=0,
-    resMethod="near",
-    verbose=False):
+    nRes       = None,
+    epsg       = None,
+    clip       = None,
+    nBands     = None,
+    featureNum = 0,
+    verbose    = False,
+    geoExtent  = None,
+    arrExtent  = None,
+    load_data  = False,
+    resMethod  = "near"):
 
     """
-    Function to apply all kind of geo-pre-processings on a raster
+    Function to load metadata and data, after applying 
+    all kind of geo-pre-processings on a georaster
 
     - PARAMETERS -
         target (mandatory) : str - the path to the raster file to open
-        geoim : boolean - if True, the function return a telenvi.GeoIm object. Else, a gdal.Dataset
+        geoim : boolean - if True, the function return a telenvi.geoim object. Else, a gdal.Dataset
         nBands : int or list - the band number to load, if target is a multispectral raster
         geoExtent - describe a spatial extent to crop the target
             str : a path to a shapefile or to a rasterfile
@@ -844,7 +845,7 @@ def pre_process(
             (firstCol, firstRow, lastCol, lastRow)
         nRes : int - the new resolution or pixel size to give to the target by resampling
         epsg : int - the epsg of a Coordinates System Reference. Target is reprojected in it.
-        clip : str - A path to an other raster file or a GeoIm object.
+        clip : str - A path to an other raster file or a geoim object.
                 This case is different than just "crop" according to another
                 raster file because here, the resolution, the xOrigin and yOrigin and the spatial 
                 projection are setup according to this other raster file.
@@ -853,8 +854,8 @@ def pre_process(
         verbose : boolean - write informations during the pre-processings
 
     - RETURNS -
-        if geoim : a telenvi.GeoIm instance
-        if not geoim : a gdal.Dataset instance
+        if load_data : a telenvi.geoim instance
+        if not load_data : a gdal.Dataset instance
     """
 
     if verbose: 
@@ -933,12 +934,12 @@ def pre_process(
     # Matrixian crop
     if arrExtent != None:
         inDs, inArray = cropFromIndexes(inDs, arrExtent)
-        if geoim:
-            return GeoIm.GeoIm(inDs, inArray)
+        if load_data:
+            return geoim.Geoim(inDs, inArray)
 
     # Returns
-    if geoim:
-        return GeoIm.GeoIm(inDs)
+    if load_data:
+        return geoim.Geoim(inDs)
     else:
         return inDs
 

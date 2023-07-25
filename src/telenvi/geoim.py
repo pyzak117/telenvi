@@ -1,6 +1,6 @@
 module_description = """
---- telenvi.GeoIm ---
-Use GeoIm objects to read only once a raster file array.
+--- telenvi.Geoim ---
+Use Geoim objects to read only once a raster file array.
 Then make crops, compute optical indexes or statisticals
 data from this array, with geo attributes under the hand
 """
@@ -28,7 +28,7 @@ from geocube.api.core import make_geocube
 # Image processing libraries
 from PIL import Image, ImageEnhance
 
-class GeoIm:
+class Geoim:
 
     def __init__(self, target, array=None):
 
@@ -44,7 +44,7 @@ class GeoIm:
                 print(f"dataset shape {rt.getShape(ds)[1:]} != array shape {rt.getShape(array)[1:]}")
                 return None
 
-            # Then we assign ds and array as geoim instance attributes
+            # Then we assign ds and array as Geoim instance attributes
             self.ds = ds
             self._array = array
             self.updateDs()
@@ -59,8 +59,8 @@ class GeoIm:
 
     def setArray(self, newArray):
         """
-        this method is called each time we change the geoim instance array
-        because if the geoim array change, the array contained in the
+        this method is called each time we change the Geoim instance array
+        because if the Geoim array change, the array contained in the
         instance.Dataset must change to
         """
 
@@ -104,45 +104,45 @@ class GeoIm:
     def __add__(self, n):
 
         # Create an instance copy
-        nGeoIm = self.copy()
+        nGeoim = self.copy()
 
-        # If it's a geoim we extract is array
-        if type(n) == GeoIm:
+        # If it's a Geoim we extract is array
+        if type(n) == Geoim:
             n = n.array
 
         # Then we make an operation between copy instance array and n - which can be a int, or a float...
         # The array contained in the n.array Dataset is automatically updated thanks to the array setter
-        nGeoIm.array += n
+        nGeoim.array += n
 
-        return nGeoIm
+        return nGeoim
 
     def __sub__(self, n):
-        nGeoIm = self.copy()
-        if type(n) == GeoIm:
+        nGeoim = self.copy()
+        if type(n) == Geoim:
             n = n.array
-        nGeoIm.array -= n
-        return nGeoIm
+        nGeoim.array -= n
+        return nGeoim
     
     def __mul__(self, n):
-        nGeoIm = self.copy()
-        if type(n) == GeoIm:
+        nGeoim = self.copy()
+        if type(n) == Geoim:
             n = n.array
-        nGeoIm.array *= n
-        return nGeoIm
+        nGeoim.array *= n
+        return nGeoim
     
     def __truediv__(self, n):
-        nGeoIm = self.copy()
-        if type(n) == GeoIm:
+        nGeoim = self.copy()
+        if type(n) == Geoim:
             n = n.array
-        nGeoIm.array /= n
-        return nGeoIm
+        nGeoim.array /= n
+        return nGeoim
 
     def __pow__(self, n):
-        nGeoIm = self.copy()
-        if type(n) == GeoIm:
+        nGeoim = self.copy()
+        if type(n) == Geoim:
             n = n.array
-        nGeoIm.array = nGeoIm.array ** n
-        return nGeoIm
+        nGeoim.array = nGeoim.array ** n
+        return nGeoim
 
     def __repr__(self):
         print(
@@ -156,7 +156,7 @@ array type : {self.array.dtype}""")
         return ""
 
     def copy(self):
-        return GeoIm(self.ds, self.array)
+        return Geoim(self.ds, self.array)
 
     def getOrigin(self):
         return rt.getOrigin(self.ds)
@@ -211,7 +211,7 @@ array type : {self.array.dtype}""")
         elif type(vector) in (shapely.geometry.polygon.Polygon, shapely.geometry.multipolygon.MultiPolygon):
             bounds = vector.bounds
 
-        # And we cut the geoim on it
+        # And we cut the Geoim on it
         return self.cropFromBounds(bounds, verbose = verbose, inplace = inplace)
 
     def cropFromRaster(self, model, verbose = False, inplace=False):
@@ -219,7 +219,7 @@ array type : {self.array.dtype}""")
         # We get the croper dataset and his geo extent
         modelBounds = rt.getGeoBounds(rt.getDs(model))
 
-        # And we cut the geoim on it
+        # And we cut the Geoim on it
         return self.cropFromBounds(modelBounds, verbose = verbose, inplace = inplace)
 
     def cropFromBounds(self, bounds, verbose = False, inplace=False):
@@ -227,7 +227,7 @@ array type : {self.array.dtype}""")
         # We get the matrixian coordinates of the intersection area between the raster and the box
         crop_indexes = rt.spaceBox_to_arrayBox(bounds, self.ds, self.array)
 
-        # And we cut the geoim on it
+        # And we cut the Geoim on it
         return self.cropFromIndexes(crop_indexes, verbose = verbose, inplace = inplace)
 
     def cropFromIndexes(self, indexes, inplace=False, verbose = False):
@@ -235,7 +235,7 @@ array type : {self.array.dtype}""")
         indexes : tuple - (row1, col1, row2, col2)
         """        
 
-        # We create a copy of the geoim instance if not inplace arg
+        # We create a copy of the Geoim instance if not inplace arg
         target = self.copy()
 
         # Get metadata
@@ -248,7 +248,7 @@ array type : {self.array.dtype}""")
         # Extract the array part between thoses indexes
         new_array = target.array[row1:row2, col1:col2]
 
-        # Assign this new array to the geoim
+        # Assign this new array to the Geoim
         target.setArray(new_array)
 
         # Compute new origin point
@@ -319,7 +319,7 @@ array type : {self.array.dtype}""")
         inside : boolean - describe if the data to keep unmasked 
         is inside (True) or outside (False) the vector outlines.
 
-        verbose : boolean - to see how many features intersect the GeoIm
+        verbose : boolean - to see how many features intersect the Geoim
 
         - RETURNS -
         masked_array : numpy.ma.masked_array - an array of 2 dimensions.
@@ -342,7 +342,7 @@ array type : {self.array.dtype}""")
         elif type(vector) in (shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon):
             vector = gpd.GeoDataFrame([{'geometry':vector}]).set_crs(epsg=epsg)
 
-        # Then set is crs to be the same than the geoim
+        # Then set is crs to be the same than the Geoim
         # vector.set_crs(epsg=epsg, allow_override=True, inplace=True)
         # This line raise a warning
 
@@ -352,7 +352,7 @@ array type : {self.array.dtype}""")
         # Select the features intersecting the image geo-extent
         vector = vector[vector["geometry"].intersects(self.drawGeomExtent(geomType="shly")) == True].copy()
         if verbose and vector_name != "":
-            print(f"{vector_name} : {len(vector)} polygon intersecting the geoim")
+            print(f"{vector_name} : {len(vector)} polygon intersecting the Geoim")
         if len(vector) == 0:
             return None
 
@@ -441,17 +441,17 @@ array type : {self.array.dtype}""")
 
     def makeMosaic(self, thumbsY=2, thumbsX=2):
         """
-        build many geoims side by side from the instance
+        build many Geoims side by side from the instance
         :params:
             nbSquaresByAx : int
                 default : 2
                 the number of cells to cells along the X size and the Y size
-                from the current instance. 2 means you will have 4 GeoIms in
+                from the current instance. 2 means you will have 4 Geoims in
                 return. The current instance will be split in 2 lines and 2 cols.
 
         :returns:
             mosaic : list
-                a list of GeoIms
+                a list of Geoims
         """
 
         cells_nRows=int(self.getShape()[1]/thumbsY)
@@ -470,7 +470,7 @@ array type : {self.array.dtype}""")
 
     def splitBands(self):
         """
-        send a list of geoims monospectral for each band in the current instance
+        send a list of Geoims monospectral for each band in the current instance
         """
         nBands=self.getShape()[0]
 
@@ -480,7 +480,7 @@ array type : {self.array.dtype}""")
         elif nBands > 1:
             bands=[]
             for band in self.array:
-                new=GeoIm(self.ds, band)
+                new=Geoim(self.ds, band)
                 new.updateDs(band)
                 bands.append(new)
 
@@ -490,7 +490,7 @@ array type : {self.array.dtype}""")
 
         """
         :descr:
-            display one band of the GeoIm
+            display one band of the Geoim
         
         :params:
             index : tuple
@@ -500,7 +500,7 @@ array type : {self.array.dtype}""")
 
             band : int
                 default=0
-                the index of the band to display if the geoim is multispectral
+                the index of the band to display if the Geoim is multispectral
 
         :returns:
             None
@@ -537,7 +537,7 @@ array type : {self.array.dtype}""")
 
         """
         :descr:
-            display 3 bands of the GeoIm in RGB mode
+            display 3 bands of the Geoim in RGB mode
         
         :params:
             colorMode : list or tuple
@@ -570,10 +570,10 @@ array type : {self.array.dtype}""")
         _, nRows, nCols=self.getShape()
 
         if len(self.array.shape) != 3:
-            raise AttributeError("You need a GeoIm in 3 dimensions to display a GeoIm in RGB")
+            raise AttributeError("You need a Geoim in 3 dimensions to display a Geoim in RGB")
 
         if self.array.shape[0] < 3:
-            raise AttributeError("The GeoIm have only {} channel and we need 3 channels to display it in RGB")
+            raise AttributeError("The Geoim have only {} channel and we need 3 channels to display it in RGB")
 
         # Convert array into RGB array
 
@@ -648,7 +648,7 @@ array type : {self.array.dtype}""")
         # Get Matrixian coordinates of the geographic point
         row, col = rt.spaceCoord_to_arrayCoord(geoPoint, self)
 
-        # Just a block to process GeoIm with many bands
+        # Just a block to process Geoim with many bands
         if self.getShape()[0] > 1:
             values = []
             for band in self.array:
