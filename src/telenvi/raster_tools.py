@@ -803,7 +803,6 @@ def vectorize(target, mode='points'):
         gpd_polygonized_raster = gpd.GeoDataFrame.from_features(geoms).set_crs(epsg=2154)
         """
 
-
 def cropFromIndexes(target, indexes):
 
     # Unpack indexes

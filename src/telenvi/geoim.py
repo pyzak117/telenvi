@@ -1,4 +1,3 @@
-#%%
 module_description = """
 --- telenvi.Geoim ---
 Use Geoim objects to read only once a raster file array.
@@ -753,4 +752,4 @@ array type : {self.array.dtype}""")
         return values
 
     def vectorize(self):
-        return rt.vectorize(self.ds, mode)
+        return rt.vectorize(self.ds)
