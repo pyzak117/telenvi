@@ -741,15 +741,19 @@ def vectorize(target, mode='points'):
         x_pixel_size, y_pixel_size = getPixelSize(target)
         nBands, nCols, nRows = getShape(target)
 
+        # Adjust the origins to put the vector point on the center of their corresponding pixels
+        x_grid_origin = x_origin + (x_pixel_size - (x_pixel_size/2))
+        y_grid_origin = y_origin + (y_pixel_size - (y_pixel_size/2)) 
+
         # Create coordinate arrays
         x_coords = np.arange(
-            start= x_origin, 
-            stop = x_origin + x_pixel_size * nRows,
+            start= x_grid_origin,
+            stop = x_grid_origin + x_pixel_size * nRows,
             step = x_pixel_size)
 
         y_coords = np.arange(
-            start= y_origin, 
-            stop = y_origin + y_pixel_size * nCols,
+            start= y_grid_origin,
+            stop = y_grid_origin + y_pixel_size * nCols,
             step = y_pixel_size)
 
         # A 3 dimensionals arrays. We use it like coords[:, posY, posX]
