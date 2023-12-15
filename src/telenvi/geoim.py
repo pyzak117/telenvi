@@ -490,7 +490,7 @@ array type : {self.array.dtype}""")
 
             return bands
 
-    def show(self, index=None, band=0, colors="viridis", bar=True):
+    def show(self, index=None, band=0, cmap="viridis", bar=True):
 
         """
         :descr:
@@ -519,10 +519,10 @@ array type : {self.array.dtype}""")
 
         # Plot
         if nBands > 1:
-            plt.imshow(self.array[band][row1:row2, col1:col2], cmap=colors)
+            plt.imshow(self.array[band][row1:row2, col1:col2], cmap=cmap)
 
         else:
-            plt.imshow(self.array[row1:row2, col1:col2], cmap=colors)
+            plt.imshow(self.array[row1:row2, col1:col2], cmap=cmap)
 
         if bar:
             plt.colorbar()
@@ -654,33 +654,6 @@ array type : {self.array.dtype}""")
         # Set the array in a new geoim
         new = Geoim(self.ds, new_array)
         return new
-
-    def clusterize(self, n_clusters, n_init=10):
-
-        """
-        Apply a KMeans clusterization on the geoim
-        """
-
-        # Reshape the array for the clustering
-        target_array = self.array.reshape(-1,1)
-
-        # Create the classifier
-        k_means_classifier = cluster.KMeans(n_clusters=n_clusters, n_init=n_init)
-
-        # Fit to the data
-        k_means_classifier.fit(target_array)
-
-        # Get the labels
-        clusters_labels = k_means_classifier.labels_
-
-        # re-switch the classified vector as image (2D array)
-        clusterized_array = clusters_labels.reshape(self.array.shape)
-
-        # write the new array in a new geoim
-        clusterized = self.copy()
-        clusterized.array = clusterized_array
-
-        return clusterized
 
     def getCentroids(self):
         pX, pY = self.getPixelSize()

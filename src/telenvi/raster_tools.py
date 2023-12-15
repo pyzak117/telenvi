@@ -360,7 +360,7 @@ def cropFromRaster(target, model, resMethod = "near", outpath = "", verbose = Fa
     # Get data on the intersection area
     return cropFromVector(target, inter_extent, resMethod = resMethod, outpath = outpath, verbose=verbose)
 
-def cropFromVector(target, vector, resMethod = "near", outpath="", polygon=0, verbose=False):
+def cropFromVector(target, vector, layername='', resMethod = "near", outpath="", polygon=0, verbose=False):
     """
     cut the image according to a vector geometry
 
@@ -388,11 +388,18 @@ def cropFromVector(target, vector, resMethod = "near", outpath="", polygon=0, ve
     # If vector argument is a path to a shapefile,
     # here we extract only one polygon of this shapefile
     if type(vector) == str:
-        layer=gpd.read_file(vector)
+
+        # Open the file
+        if vector.endswith('.shp'):
+            layer = gpd.read_file(vector)
+        elif vector.endswith('.gpkg'):
+            layer = gpd.read_file(vector, layer=layername)
+
+        # Extract the geometry
         vector=layer["geometry"][polygon]
 
     # Extract Coordinates extent
-    if type(vector) == shapely.geometry.polygon.Polygon:    
+    if type(vector) in (shapely.geometry.polygon.Polygon, shapely.geometry.multipolygon.MultiPolygon):    
         xMin, yMin, xMax, yMax=vector.bounds
 
     elif type(vector) in (tuple, list):
@@ -851,8 +858,9 @@ def Open(
     featureNum = 0,
     verbose    = False,
     geoExtent  = None,
+    layername  = '',
     arrExtent  = None,
-    load_data  = False,
+    load_pixels  = False,
     resMethod  = "near"):
 
     """
@@ -879,8 +887,8 @@ def Open(
         verbose : boolean - write informations during the pre-processings
 
     - RETURNS -
-        if load_data : a telenvi.geoim instance
-        if not load_data : a gdal.Dataset instance
+        if load_pixels : a telenvi.geoim instance
+        if not load_pixels : a gdal.Dataset instance
     """
 
     if verbose: 
@@ -918,6 +926,8 @@ def Open(
         if type(geoExtent) == str:
             if geoExtent[-4:].lower() == ".shp":
                 inDs=cropFromVector(inDs, geoExtent, polygon=featureNum, verbose=verbose)
+            elif geoExtent.endswith('.gpkg'):
+                inDs=cropFromVector(inDs, geoExtent, layername, polygon=featureNum, verbose=verbose)
             else :
                 try:
                     geoExtent = getDs(geoExtent)
@@ -959,11 +969,11 @@ def Open(
     # Matrixian crop
     if arrExtent != None:
         inDs, inArray = cropFromIndexes(inDs, arrExtent)
-        if load_data:
+        if load_pixels:
             return geoim.Geoim(inDs, inArray)
 
     # Returns
-    if load_data:
+    if load_pixels:
         return geoim.Geoim(inDs)
     else:
         return inDs
