@@ -28,7 +28,7 @@ import rasterio
 from rasterio.features import shapes
 from shapely.errors import ShapelyDeprecationWarning
 
-# import richdem as rd
+import richdem as rd
 import geopandas as gpd
 from osgeo import gdal, gdalconst, osr, ogr
 
@@ -360,7 +360,7 @@ def cropFromRaster(target, model, resMethod = "near", outpath = "", verbose = Fa
     # Get data on the intersection area
     return cropFromVector(target, inter_extent, resMethod = resMethod, outpath = outpath, verbose=verbose)
 
-def cropFromVector(target, vector, layername='', resMethod = "near", outpath="", polygon=0, verbose=False):
+def cropFromVector(target, vector, layername='', resMethod = "near", outpath="", featureNum=0, featureCondition={}, verbose=False):
     """
     cut the image according to a vector geometry
 
@@ -395,8 +395,17 @@ def cropFromVector(target, vector, layername='', resMethod = "near", outpath="",
         elif vector.endswith('.gpkg'):
             layer = gpd.read_file(vector, layer=layername)
 
+        # Extract the feature
+        if featureCondition != {}:
+            column_name = list(featureCondition.keys())[0]
+            wanted_value = featureCondition[column_name]
+            vector = layer[layer[column_name] == wanted_value].iloc[featureNum]
+
+        else:
+            vector=layer.iloc[featureNum]
+
         # Extract the geometry
-        vector=layer["geometry"][polygon]
+        vector = vector.geometry
 
     # Extract Coordinates extent
     if type(vector) in (shapely.geometry.polygon.Polygon, shapely.geometry.multipolygon.MultiPolygon):    
@@ -859,6 +868,7 @@ def Open(
     verbose    = False,
     geoExtent  = None,
     layername  = '',
+    featureCondition  = {},
     arrExtent  = None,
     load_pixels  = False,
     resMethod  = "near"):
@@ -922,12 +932,14 @@ def Open(
         if verbose: print(f"reprojection\n---\nin  : {getCrsEpsg(target)}\nout : {epsg}\n---\n")
         inDs=reproj(inDs, epsg)
 
-    def _geoCrop(inDs, geoExtent, featureNum, verbose):
+    def _geoCrop(inDs, geoExtent, featureNum, verbose, featureCondition=featureCondition):
         if type(geoExtent) == str:
             if geoExtent[-4:].lower() == ".shp":
-                inDs=cropFromVector(inDs, geoExtent, polygon=featureNum, verbose=verbose)
+                inDs=cropFromVector(inDs, geoExtent, featureNum=featureNum, verbose=verbose, featureCondition=featureCondition)
             elif geoExtent.endswith('.gpkg'):
-                inDs=cropFromVector(inDs, geoExtent, layername, polygon=featureNum, verbose=verbose)
+                inDs=cropFromVector(inDs, geoExtent, layername, featureNum=featureNum, verbose=verbose, featureCondition=featureCondition)
+            elif geoExtent == '':
+                pass
             else :
                 try:
                     geoExtent = getDs(geoExtent)
@@ -940,6 +952,10 @@ def Open(
         if type(geoExtent) in [list, tuple]: # xMin, yMin, xMax, yMax
             if verbose: print(f"crop\n---\nxMin : {geoExtent[0]}\nyMin : {geoExtent[1]}\nxMax : {geoExtent[2]}\nyMax : {geoExtent[3]}\n---\n")
             inDs=cropFromVector(inDs, geoExtent)
+
+        if type(geoExtent) in [shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon]:
+            inDs=cropFromVector(inDs, geoExtent)
+
         return inDs
 
     def _extractBands(inDs, nBands):
@@ -983,6 +999,28 @@ def getRasterioDs(target):
     Send a rasterio dataset from a path or a gdal dataset
     """
     pass
+
+def getSlope(dem):
+    """
+    Compute slope in degrees from a dem 
+    """
+
+    # Load the data
+    if not type(dem) == geoim.Geoim:
+        dem = Open(dem, load_pixels=True)
+
+    # Convert the GeoIm numpy.ndarray to richdem.rdarray (pre-processing before slope computing)
+    dem_rdarray = rd.rdarray(dem.array, no_data=-9999)
+    dem_rdarray.geotransform = dem.ds.GetGeoTransform()
+    dem_rdarray.projection = dem.ds.GetProjection()
+
+    # Compute slope and conert in degrees unit
+    slope_deg = np.array(np.degrees(np.arctan(rd.TerrainAttribute(dem_rdarray, attrib = "slope_riserun"))))
+
+    # Create a geoim with this array and the same dataset than the initial dem
+    slope = geoim.Geoim(dem.ds, slope_deg)
+
+    return slope
 
 # if __name__ == "__main__":
 # 

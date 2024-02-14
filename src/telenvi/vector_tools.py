@@ -94,3 +94,13 @@ def serializeGeoLines(spine, ribLength, ribStep, ribOrientation='v'):
         ribs = [getGeoThing([(origin.x + r, origin.y),(origin.x - r, origin.y)]) for origin in ribsOrigins]
 
     return ribs
+
+def simplifyPolygons(polygons, rayon_buffer = 30, tolerance = 6):
+
+    # Smooth the polygons by first apply an erosion-dilatation
+    polygons['geometry'] = polygons.apply(lambda row: row.geometry.buffer(distance=rayon_buffer).buffer(distance=-rayon_buffer),axis=1)
+
+    # Then simplify them
+    polygons['geometry'] = polygons.apply(lambda row: row.geometry.simplify(tolerance=tolerance), axis=1)
+
+    return polygons

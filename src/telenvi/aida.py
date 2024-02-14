@@ -7,6 +7,8 @@ from tqdm import tqdm
 
 # Data libraries
 import numpy as np
+from skimage import morphology
+from skimage import measure
 from sklearn import cluster
 
 # Image processing
@@ -35,39 +37,68 @@ def get_array(input_target):
 
     return output_array, input_is_geoim
 
-def get_auto_clusters(input_target, n_clusters=2, n_init=10):
+def get_auto_clusters(input_target, n_clusters, n_init=10, to_exclude=-999, mode=''):
     """
-    Apply a KMeans clusterization on the geoim
+    input_target : 2D array
+    n_clusters   : int, number of clusters to create
+    n_init       : int
+    to_exclude   : this value will not be taken in account for the clustering
+                   and the pixels with this value will keep the same value
+    mode         : 'labels', 'barycentres' or '' for both (default behavior)
     """
 
-    # Extract array
+    # Extract array if the input is a geoim or a dataset
     input_array, input_is_geoim = get_array(input_target)
 
-    # Reshape the array for the clustering
-    input_reshaped = input_array.reshape(-1,1)
+    # Exclusion des valeurs à éviter
+    valid_array  = input_array[input_array != to_exclude]
 
-    # Create the classifier
-    k_means_classifier = cluster.KMeans(
+    # Transformation de la matrice d'entrée pour qu'elle soit valide vis à vis du k-means
+    linear_valid_array = valid_array.reshape(-1,1)
+
+    # This will be useful later, for the reshape
+    input_linear = input_array.reshape(-1,1)
+
+    # Créée un estimateur KMeans vide
+    estimator = cluster.KMeans(
         n_clusters=n_clusters, 
         n_init=n_init)
 
-    # Fit to the data
-    k_means_classifier.fit(input_reshaped)
+    # Charge les données dans l'estimateur
+    estimator.fit(linear_valid_array)
 
-    # Get the labels by prediction
-    labels = k_means_classifier.predict(input_reshaped)
+    # Extrait les labels
+    linear_valid_labels = estimator.labels_
 
-    # Get the value of the barycentre of each label
-    input_segmented = k_means_classifier.cluster_centers_[labels].reshape(input_array.shape)
+    # Réintègre les valeurs initiales
+    output_labels_linear = input_linear + 0
+    output_labels_linear[output_labels_linear != to_exclude] = linear_valid_labels
 
+    # Pareil pour les barycentres
+    linear_valid_barycentres = estimator.cluster_centers_[linear_valid_labels].flatten()
+    output_barycentres_linear = input_linear + 0
+    output_barycentres_linear[output_barycentres_linear != to_exclude] = linear_valid_barycentres
+
+    # Retransformation matricielle en deux dimensions
+    output_labels      = output_labels_linear.reshape(input_array.shape)
+    output_barycentres = output_barycentres_linear.reshape(input_array.shape)
+
+    # Combinaison des deux... Ou pas
+    if mode == '':
+        output_array = np.array((output_labels, output_barycentres))
+    elif mode == 'labels':
+        output_array = output_labels
+    elif mode == 'barycentres':
+        output_array = output_barycentres
+
+    # Intégration de la nouvelle matrice dans un geoim
     if input_is_geoim:
-
-        # write the new array in a new geoim
         out_geoim = input_target.copy()
-        out_geoim.array = input_segmented
+        out_geoim.array = output_array
         return out_geoim
 
-    return input_segmented
+    # Ou pas
+    return output_array
 
 def shift_hist(input_target, breakpoint):
 
@@ -126,7 +157,46 @@ def get_manual_clusters(input_target, thresholds):
 
     return bins
 
-def get_binary_contours(binary_target):
+def denoise_binary_image(binary_target, small_objects_min_size = 150, morpho_operator_size = 1, value_to_keep='highest'):
+
+    # Extract array from input target
+    binary_array, input_is_geoim = get_array(binary_target)
+
+    # Create a mask to binarize the array
+    if value_to_keep[0].lower() == 'h':
+        mask = (binary_array > binary_array.min())
+    else:
+        mask = (binary_array < binary_array.max())
+
+    # Dilatation to connect pixels
+    mask_dilated = morphology.dilation(mask, morphology.square(morpho_operator_size))
+
+    # Erosion to delete the noise (isolated pixels)
+    mask_eroded = morphology.erosion(mask_dilated, morphology.square(morpho_operator_size))
+
+    # Labeled the regions
+    labeled_regions = measure.label(mask_eroded)
+
+    # Delete small regions
+    filtered_regions = morphology.remove_small_objects(
+        labeled_regions, 
+        min_size=small_objects_min_size)
+
+    # Create final output
+    if value_to_keep[0].lower() == 'h':
+        filtered_regions[filtered_regions > 0] = 1
+    else:
+        filtered_regions[filtered_regions == 0] = 1
+
+    # Put the array in a geoim
+    if input_is_geoim:
+        out_geoim = binary_target.copy()
+        out_geoim.array = filtered_regions
+        return out_geoim
+    
+    return filtered_regions
+
+def get_binary_contours(binary_target, epsg=''):
 
     # Load data in a Geoim
     if type(binary_target) != geoim.Geoim:
@@ -146,9 +216,12 @@ def get_binary_contours(binary_target):
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE)
 
+    # Get only the contours with more than 2 segments to build polygons :
+    contours = filter(lambda x: len(x) > 2, contours)
+
     # For each contour
     geometries = []
-    print('Vectorization...')
+    print('Vectorisation...')
     for in_contour in tqdm(contours):
 
         # For each point
@@ -171,6 +244,11 @@ def get_binary_contours(binary_target):
         geometries.append(out_polygon)
 
     # Build a geodataframe
-    geooutput = gpd.GeoDataFrame().set_geometry(geometries)
+    out_gdf = gpd.GeoDataFrame().set_geometry(geometries)
     print('Done')
-    return geooutput
+
+    # Set a CRS
+    if epsg != '':
+        out_gdf = out_gdf.set_crs(epsg=epsg)
+
+    return out_gdf
