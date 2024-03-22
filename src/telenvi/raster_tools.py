@@ -8,12 +8,15 @@ syntax.
 # telenvi modules
 from telenvi.associations import npdtype_gdalconst, extensions_drivers
 import telenvi.geoim as geoim
+import telenvi.vector_tools as vt 
 
 # Standard libraries
+import numbers
 import os
 import json
 import pathlib
 import warnings
+from pathlib import Path
 
 # CLI libraries
 from tqdm import tqdm
@@ -1022,7 +1025,90 @@ def getSlope(dem):
 
     return slope
 
-# if __name__ == "__main__":
+def getAspect(dem):
+    """
+    Compute aspect in degrees from a dem 
+    """
+
+    # Load the data
+    if not type(dem) == geoim.Geoim:
+        dem = Open(dem, load_pixels=True)
+
+    # Convert the GeoIm numpy.ndarray to richdem.rdarray (pre-processing before aspect computing)
+    dem_rdarray = rd.rdarray(dem.array, no_data=-9999)
+    dem_rdarray.geotransform = dem.ds.GetGeoTransform()
+    dem_rdarray.projection = dem.ds.GetProjection()
+
+    # Compute aspect and conert in degrees unit
+    aspect_deg = np.array(rd.TerrainAttribute(dem_rdarray, attrib = "aspect"))
+
+    # Create a geoim with this array and the same dataset than the initial dem
+    aspect = geoim.Geoim(dem.ds, aspect_deg)
+
+    return aspect
+
+def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt']):
+    """
+    Map the extents of the rasters contained in a directory
+    """
+
+    target_dir_path = Path(target_dir_path)
+
+    # Track the rasters compatible with each extensions 
+    targets_paths = []
+    for xt in extensions:
+        xt = xt.removeprefix('.')
+        targets_paths += list(target_dir_path.glob(f'*{xt}'))
+
+    # Write their filepaths in a geodataframe
+    geo_extents = pd.DataFrame([{'filepath':str(path)} for path in targets_paths])
+
+    # Map their extents
+    geo_extents['geometry'] = geo_extents.apply(lambda row: drawGeomExtent(row.filepath, 'shly'), axis=1)
+
+    # Convert into GeoDataFrame
+    geo_extents = gpd.GeoDataFrame(geo_extents).set_crs(epsg)
+
+    # geo_extents = gpd.GeoDataFrame([{'geometry':drawGeomExtent(track, 'shly'), 'dataset':str(track)} for track in targets]).set_crs(epsg=epsg)
+    return geo_extents
+
+def OpenFromMultipleTargets(
+    target_source : str | gpd.GeoDataFrame,
+    layername : str = '',
+    area_of_interest : shapely.Polygon = None,
+    load_pixels : bool = False,
+    nRes : numbers.Real = None,
+    ):
+
+    """
+    Make Geoprocessings to open one raster from a directory containing many, only on a selected area    
+    """
+
+    # Open the metadata of the targets as vector files
+    if type(target_source) == gpd.GeoDataFrame or (type(target_source) == str and target_source.endswith(('.gpkg', '.shp'))):
+        tracks_metamap = vt.Open(target_source)
+    else:
+        tracks_metamap = getRastermap(target_source)
+
+    # Here we find the tracks intersecting the rock glacier outlines
+    tracks_metadata = tracks_metamap[tracks_metamap.intersects(area_of_interest)==True]
+
+    # Crope each dems intersecting the rock glacier
+    tracks_ds = [Open(track.filepath, load_pixels=False, geoExtent=area_of_interest) for track in tracks_metadata.iloc]
+
+    # Merge
+    tracks_merged = merge(tracks_ds)
+
+    # return tracks_merged
+
+    # Resampling if needed
+    if nRes is not None:
+        tracks_merged = resize(tracks_merged, xRes=nRes)
+    
+    # Loading
+    return Open(tracks_merged, load_pixels=load_pixels)
+
+#TODO if __name__ == "__main__":
 # 
 #     # There is a lot of work to do here
 #     # To use this toolbox from command line

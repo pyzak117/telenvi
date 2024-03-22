@@ -490,7 +490,7 @@ array type : {self.array.dtype}""")
 
             return bands
 
-    def show(self, index=None, band=0, cmap="viridis", bar=True):
+    def show(self, index=None, band=0, cmap="viridis", bar=True, vmin=None, vmax=None):
 
         """
         :descr:
@@ -521,8 +521,13 @@ array type : {self.array.dtype}""")
         if nBands > 1:
             plt.imshow(self.array[band][row1:row2, col1:col2], cmap=cmap)
 
+            if vmin is not None and vmax is not None:
+                plt.imshow(self.array[band][row1:row2, col1:col2], cmap=cmap, vmin=vmin, vmax=vmax)
+
         else:
             plt.imshow(self.array[row1:row2, col1:col2], cmap=cmap)
+            if vmin is not None and vmax is not None:
+                plt.imshow(self.array[row1:row2, col1:col2], cmap=cmap, vmin=vmin, vmax=vmax)
 
         if bar:
             plt.colorbar()
@@ -671,10 +676,9 @@ array type : {self.array.dtype}""")
         """
         extract the pixel(s) values under a geoPoint
         """
-
         # Get Matrixian coordinates of the geographic point
         row, col = rt.spaceCoord_to_arrayCoord(geoPoint, self)
-
+        
         # Just a block to process Geoim with many bands
         if self.getShape()[0] > 1:
             values = []
@@ -682,7 +686,10 @@ array type : {self.array.dtype}""")
                 values.append(band[row][col])
             return values
         else:
-            return self.array[row][col]
+            try:
+                return self.array[row][col]
+            except IndexError:
+                return -999
 
     def inspectGeoLine(self, geoLine):
         """
@@ -694,6 +701,7 @@ array type : {self.array.dtype}""")
 
         # Extract pixel values on each point
         values = [self.inspectGeoPoint(p) for p in geoPoints]
+        values = list(filter(lambda v: v != -999, values))
         return values
 
     def inspectGeoPolygon(self, geoPolygon):

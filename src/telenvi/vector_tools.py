@@ -9,6 +9,28 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 
+def Open(layer_source, layer_name=None, target_epsg=0):
+    """
+    Return a GeoDataFrame from vector file (shapefile or geopackage)
+    """
+
+    if type(layer_source) == gpd.GeoDataFrame:
+        return layer_source
+
+    if str(layer_source).lower().endswith('.shp'):
+        layer = gpd.read_file(layer_source)
+    
+    elif str(layer_source).lower().endswith('.gpkg'):
+        if layer_name is None:
+            layer = gpd.read_file(layer_source)
+        else:
+            layer = gpd.read_file(layer_source, layer=layer_name)
+
+    if target_epsg != 0:
+        layer = layer.to_crs(target_epsg)
+
+    return layer
+
 def getGeoThing(target):
     """
     Return a shapely.geometry object from different cases 
@@ -40,6 +62,33 @@ def getGeoThing(target):
             geoThing = shapely.geometry.polygon.Polygon(target)
 
     return geoThing
+
+def getMainAxes(polygon : shapely.Polygon | shapely.MultiPolygon):
+    """
+    Return 2 shapely.LineString objects, describing the major axes of the RGU extended outlines bounding box
+    """
+    
+     # Get the rotated rectangle of the Extended outline
+    geobox = polygon.minimum_rotated_rectangle
+
+    # Box coords
+    corners = np.array(geobox.boundary.coords)[:-1]
+    
+    # Split X and Y corners coordinates
+    xa, xb, xc, xd = corners[:,0]
+    ya, yb, yc, yd = corners[:,1]
+    
+    # Middle Points
+    e = shapely.Point([(xa+xb)/2, (ya+yb)/2])
+    f = shapely.Point([(xc+xd)/2, (yc+yd)/2])
+    g = shapely.Point([(xa+xd)/2, (ya+yd)/2])
+    h = shapely.Point([(xb+xc)/2, (yb+yc)/2])
+
+    # Axis
+    major_axis = shapely.LineString([e,f])
+    minor_axis = shapely.LineString([g,h])
+
+    return major_axis, minor_axis
 
 def getGeoPointsAlongGeoLine(geoLine, step):
     """
@@ -104,3 +153,12 @@ def simplifyPolygons(polygons, rayon_buffer = 30, tolerance = 6):
     polygons['geometry'] = polygons.apply(lambda row: row.geometry.simplify(tolerance=tolerance), axis=1)
 
     return polygons
+
+def cropLayerFromExtent(
+        target_layer : str | gpd.GeoDataFrame,
+        extent_feature : shapely.Polygon) -> gpd.GeoDataFrame :
+    """
+    Return a geodataframes with the row contained inside the extent
+    """
+    target_layer = Open(target_layer)
+    return target_layer[target_layer.within(extent_feature)]
