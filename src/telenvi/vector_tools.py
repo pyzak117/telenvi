@@ -8,8 +8,11 @@ import shapely
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-
-def Open(layer_source, layer_name=None, target_epsg=0):
+import telenvi.node as node
+import telenvi.segment as segment
+import numbers
+    
+def Open(layer_source, layer_name=None, target_epsg=None):
     """
     Return a GeoDataFrame from vector file (shapefile or geopackage)
     """
@@ -26,16 +29,22 @@ def Open(layer_source, layer_name=None, target_epsg=0):
         else:
             layer = gpd.read_file(layer_source, layer=layer_name)
 
-    if target_epsg != 0:
+    if target_epsg is not None:
         layer = layer.to_crs(target_epsg)
 
     return layer
 
-def getGeoThing(target):
+def getGeoThing(target = None, x = None, y = None):
     """
     Return a shapely.geometry object from different cases 
     """
 
+    # We didn't get target
+    if target is None:
+        assert x is not None and y is not None, 'input arguments invalids'
+        target = (x,y)
+    
+    # It's already a shapely.geometry (type could be shapely.Polygon, shapely.Point, shapely.LineString...)
     try :
         _ = target.coords
         return target
@@ -55,14 +64,22 @@ def getGeoThing(target):
         if len(target) == 1:
             geoThing = shapely.geometry.point.Point(target)
 
-        if len(target) == 2:
-            geoThing = shapely.geometry.linestring.LineString(target)
+        elif len(target) == 2:
 
-        if len(target) > 2:
+            # We have a tuple of numbers : a point
+            if type(type(target[0]) == type(target[1]) == numbers.Number):
+                x, y = target
+                geoThing = shapely.geometry.point.Point(x, y)
+
+            # We have a tuple of tuples : line
+            else:
+                geoThing = shapely.geometry.linestring.LineString(target)
+
+        elif len(target) > 2:
             geoThing = shapely.geometry.polygon.Polygon(target)
 
     return geoThing
-
+    
 def getMainAxes(polygon : shapely.Polygon | shapely.MultiPolygon):
     """
     Return 2 shapely.LineString objects, describing the major axes of the RGU extended outlines bounding box

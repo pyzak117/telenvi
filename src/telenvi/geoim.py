@@ -660,16 +660,41 @@ array type : {self.array.dtype}""")
         new = Geoim(self.ds, new_array)
         return new
 
-    def getCentroids(self):
-        pX, pY = self.getPixelSize()
-        _, nRows, nCols = self.getShape()
-        orX, orY = self.getOrigin()
-        centroids=[]
+    def getCentroids(self, low_threshold=None, high_threshold=None, nodes=False):
+        """
+        Return for each pixel i,j the x, y geographic coordinates
+        """
+
+        # Define threshold for pixels selection
+        if low_threshold is None:
+            low_threshold = self.array.min()
+        if high_threshold is None:
+            high_threshold = self.array.max()
+
+        # Get metadata about geographic and matrixian spaces        
+        pX, pY = self.getPixelSize()        # Genre (5, -5) pour nos insars
+        _, nRows, nCols = self.getShape()   # Le nb de lignes et de colonnes de la matrice
+        orX, orY = self.getOrigin()         # Les coordonnées géographiques de l'origine du raster
+
+        # Extract the centroids
+        centroids=[]        
+        ar = self.array
         for row in range(nRows):
             for col in range(nCols):
+                pix_value = ar[row, col]
+
+                # Check if the pixel is interesting
+                if not (pix_value >= low_threshold and pix_value <= high_threshold):
+                    continue
+                
+                # If it is we add their x and y coordinates
                 x = orX + (col * pX)
                 y = orY + (row * pY)
                 centroids.append((x,y))
+
+        if nodes:
+            centroids = [vt.node.create_node(p) for p in centroids]
+    
         return centroids
 
     def inspectGeoPoint(self, geoPoint):

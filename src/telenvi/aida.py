@@ -13,12 +13,72 @@ from sklearn import cluster
 
 # Image processing
 import cv2
+from PIL import Image, ImageFilter, ImageEnhance
 
 # Geo Libraries
 import shapely
 from osgeo import gdal
 import geopandas as gpd
 
+def rgb_im_to_geo_rgb(rgb_im, geo_template):
+
+    rgb_im_array = get_array(rgb_im)[0]
+    
+    # Builds empty geoims
+    geo_r_band = geo_template.copy()
+    geo_g_band = geo_template.copy()
+    geo_b_band = geo_template.copy()
+
+    # Extract RGB arrays
+    r_band = rgb_im_array[:, :, 0]
+    g_band = rgb_im_array[:, :, 1]
+    b_band = rgb_im_array[:, :, 2]
+
+    # Put them into geoims
+    geo_r_band.array = r_band
+    geo_g_band.array = g_band
+    geo_b_band.array = b_band
+
+    # Stack
+    georgb = rt.Open(rt.stack((geo_r_band, geo_g_band, geo_b_band)), load_pixels=True)
+
+    return georgb
+
+def blur(target, r):
+
+    # Create a gaussian blur filter
+    gaussian_filter = ImageFilter.GaussianBlur(radius=r)
+
+    # Apply it to the rgb image
+    target_blurred = target.filter(gaussian_filter)
+    return target_blurred
+
+def contrast(target, c):
+
+    # Create an enhancer
+    contrast_enhancer = ImageEnhance.Contrast(target)
+
+    # Apply it with a given factor
+    target_contrasted = contrast_enhancer.enhance(c)
+    return target_contrasted
+
+def canny(target, l, h):
+
+    # Convert our image into numpy array
+    target_array = np.array(target)
+
+    # Apply the Open CV Canny algorithm
+    edges_array = cv2.Canny(target_array, l, h)
+
+    # Re-build an PIL.Image object
+    return Image.fromarray(edges_array)
+
+def edges_detection_chain(target, r, c, l, h):
+    step_1 = blur(target, r)
+    step_2 = contrast(step_1, c)
+    step_3 = canny(step_2, l, h)
+    return (step_1, step_2, step_3)
+    
 def get_array(input_target):
     """
     extract np.array from different geodata containers
@@ -32,6 +92,9 @@ def get_array(input_target):
         output_array = input_target.array
         input_is_geoim = True
     
+    elif type(input_target) == Image:
+        output_array = np.array(input_target)
+        
     elif type(input_target) == np.ndarray:
         output_array = input_target
 
