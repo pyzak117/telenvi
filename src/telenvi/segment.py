@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 
 import telenvi.vector_tools as vt
 import telenvi.node as node
-
+import telenvi.multi_segment as multi_segment
 
 class Segment:
     """
@@ -36,15 +36,19 @@ class Segment:
         extended_b = self.b.move_along(dist, theta)
         return extended_a + extended_b
 
-    def show(self, ax=None, linecolor="black", linewidth=1, node_color="black", node_size=50, flags=True):
+    def show(self, ax=None, linecolor="black", linewidth=1, node_color="black", node_size=50, flags=True, labels_dist_from_nodes=100):
         if ax is None:
             ax = plt.subplot()
         ax.scatter(self.xs, self.ys, color=node_color, s=node_size)
-        ax.text(self.a.x, self.a.y + 50, s='A')
-        ax.text(self.b.x, self.b.y + 50, s='B')
+        if flags:
+            ax.text(self.a.x, self.a.y + labels_dist_from_nodes, s='A')
+            ax.text(self.b.x, self.b.y + labels_dist_from_nodes, s='B')
         ax.plot(self.xs, self.ys, linewidth=linewidth, color=linecolor)
         return ax
 
+    def __add__(self, other_segment):
+        return multi_segment.MultiSegment([self, other_segment])
+        
     def __repr__(self):
         self.show()
         return ''

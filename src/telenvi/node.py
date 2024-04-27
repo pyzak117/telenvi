@@ -49,8 +49,14 @@ class Node:
         """
         return Node(self.x + delta_x, self.y + delta_y)
 
+    def copy(self):
+        return Node(self.x, self.y)
+        
     def __add__(self, other_node):
         return vt.segment.Segment(self, other_node)
 
+    def __eq__(self, other_node):
+        return self.x == other_node.x and self.y == other_node.y
+        
     def __repr__(self):
         return f"{self.xy}"
