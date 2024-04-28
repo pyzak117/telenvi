@@ -12,7 +12,9 @@ def create_node(target=None, x=None, y=None):
         return target
     target_shape = vt.getGeoThing(target, x, y)
     return Node(target_shape.x, target_shape.y)
-    
+
+print('modif from xps')
+
 class Node:
     """
     Represent a point in space
