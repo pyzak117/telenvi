@@ -38,11 +38,11 @@ class MultiSegment:
         """
         pass
 
-    def show(self, ax=None):
+    def show(self, ax=None, node_size=50):
         if ax is None:
             ax = plt.subplot()
         for s in self.segments:
-            s.show(ax=ax, flags=False)
+            s.show(ax=ax, node_size=node_size)
         return ax
 
     def __repr__(self):

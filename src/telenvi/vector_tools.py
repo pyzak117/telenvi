@@ -4,14 +4,36 @@ Functions to process vector geo data through geopandas
 """
 
 # Geo libraries
+from pathlib import Path
 import shapely
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 import telenvi.node as node
 import telenvi.segment as segment
+import telenvi.multi_segment as multi_segment
+import telenvi.geo_network as geo_network
 import numbers
-    
+
+def save(target, filepath, layername=None, epsg=None, driver='gpkg'):
+
+    # Build a geodataframe
+    target = getGeoDf(target, epsg=epsg)
+
+    # Check the consistency of 
+    if not filepath.endswith(driver):
+        if not driver.startswith('.'):
+            driver = '.' + driver
+        filepath += f"{driver}"
+
+    if layername is None:
+        target.to_file(filepath, layer=layername)
+    else:
+        target.to_file(filepath)
+
+    if Path(filepath).exists():
+        print(f"{Path(filepath).name} ok")
+
 def Open(layer_source, layer_name=None, target_epsg=None):
     """
     Return a GeoDataFrame from vector file (shapefile or geopackage)
@@ -34,6 +56,29 @@ def Open(layer_source, layer_name=None, target_epsg=None):
 
     return layer
 
+def share_same_geotype(targets):
+    types_of_objects = [type(t) for t in targets]
+    uniques_types = pd.Series(types_of_objects).drop_duplicates().tolist()
+    return len(uniques_types) == 1
+
+def getGeoSerie(targets):
+    """
+    Send a geoserie from a bunch of geometric objects
+    """
+    shapely_objects = [getGeoThing(t) for t in targets]
+    assert share_same_geotype(shapely_objects), "Targets must have the same geotype"
+    return gpd.GeoSeries(shapely_objects)
+
+def getGeoDf(targets, epsg=None):
+    if type(targets) == geo_network.GeoNetwork:
+        targets = targets.nodes
+    shapely_objects = [getGeoThing(t) for t in targets]
+    assert share_same_geotype(shapely_objects), "Targets must have the same geotype"
+    gdf = gpd.GeoDataFrame(shapely_objects, columns=['geometry'])
+    if epsg is not None:
+        gdf = gdf.set_crs(epsg=2056)
+    return gdf
+
 def getGeoThing(target = None, x = None, y = None):
     """
     Return a shapely.geometry object from different cases 
@@ -53,6 +98,9 @@ def getGeoThing(target = None, x = None, y = None):
 
     if type(target) in [pd.Series, gpd.GeoSeries]:
         geoThing = target.geometry
+
+    elif type(target) == node.Node:
+        geoThing = target.shape
 
     elif type(target) in [gpd.GeoDataFrame, pd.DataFrame]:
         geoThing = target.iloc[0].geometry
