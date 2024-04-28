@@ -31,7 +31,7 @@ import rasterio
 from rasterio.features import shapes
 from shapely.errors import ShapelyDeprecationWarning
 
-import richdem as rd
+# import richdem as rd
 import geopandas as gpd
 from osgeo import gdal, gdalconst, osr, ogr
 

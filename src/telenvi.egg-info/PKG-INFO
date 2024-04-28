@@ -1,0 +1,38 @@
+Metadata-Version: 2.1
+Name: telenvi
+Version: 5.1
+Summary: Some remote sensing tricks from telenvi master students
+Home-page: https://github.com/pyzak117/telenvi
+Author: Thibaut Duvanel, Julien Pellen
+Author-email: thibaut.duvanel@univ-savoie.fr
+Project-URL: Bug Tracker, https://github.com/pyzak117/telenvi/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# telenvi
+Some remote sensing tricks from telenvi master students.
+Contain tools to work on satellites images. You can easily load georeferenced raster files in python, compute indices on them or extract their values, then make crops, resample and reprojection.
+
+## GitHub repo
+The code is available here : github.com/pyzak117/telenvi
+
+## Dependancies
+to work with telenvi you need the following libraries:
+  - gdal
+  - numpy
+  - geopandas
+  - matplotlib
+  - pillow (PIL)
+  - shapely
+
+## Installation
+pip install telenvi
+
+## Use from a python script
+```
+from telenvi import raster_tools as rt
+```

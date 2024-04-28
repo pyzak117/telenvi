@@ -9,30 +9,7 @@ import shapely
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-import telenvi.node as node
-import telenvi.segment as segment
-import telenvi.multi_segment as multi_segment
-import telenvi.geo_network as geo_network
 import numbers
-
-def save(target, filepath, layername=None, epsg=None, driver='gpkg'):
-
-    # Build a geodataframe
-    target = getGeoDf(target, epsg=epsg)
-
-    # Check the consistency of 
-    if not filepath.endswith(driver):
-        if not driver.startswith('.'):
-            driver = '.' + driver
-        filepath += f"{driver}"
-
-    if layername is None:
-        target.to_file(filepath, layer=layername)
-    else:
-        target.to_file(filepath)
-
-    if Path(filepath).exists():
-        print(f"{Path(filepath).name} ok")
 
 def Open(layer_source, layer_name=None, target_epsg=None):
     """
@@ -57,21 +34,27 @@ def Open(layer_source, layer_name=None, target_epsg=None):
     return layer
 
 def share_same_geotype(targets):
+    """
+    Check if the objects described in targets have the same type
+    """
     types_of_objects = [type(t) for t in targets]
     uniques_types = pd.Series(types_of_objects).drop_duplicates().tolist()
     return len(uniques_types) == 1
 
 def getGeoSerie(targets):
     """
-    Send a geoserie from a bunch of geometric objects
+    Funnel between different geometric objects represented in tuples, arrays, shapely geoms, geodataframe... and a geoserie
     """
+    if type(targets) in [gpd.GeoDataFrame, pd.DataFrame]:
+        return targets.geometry
     shapely_objects = [getGeoThing(t) for t in targets]
     assert share_same_geotype(shapely_objects), "Targets must have the same geotype"
     return gpd.GeoSeries(shapely_objects)
 
 def getGeoDf(targets, epsg=None):
-    if type(targets) == geo_network.GeoNetwork:
-        targets = targets.nodes
+    """
+    Funnel between different geometric objects represented in tuples, arrays, shapely geoms, geoseries... and a geodataframe
+    """
     shapely_objects = [getGeoThing(t) for t in targets]
     assert share_same_geotype(shapely_objects), "Targets must have the same geotype"
     gdf = gpd.GeoDataFrame(shapely_objects, columns=['geometry'])
@@ -98,9 +81,6 @@ def getGeoThing(target = None, x = None, y = None):
 
     if type(target) in [pd.Series, gpd.GeoSeries]:
         geoThing = target.geometry
-
-    elif type(target) == node.Node:
-        geoThing = target.shape
 
     elif type(target) in [gpd.GeoDataFrame, pd.DataFrame]:
         geoThing = target.iloc[0].geometry
@@ -210,7 +190,9 @@ def serializeGeoLines(spine, ribLength, ribStep, ribOrientation='v'):
     return ribs
 
 def simplifyPolygons(polygons, rayon_buffer = 30, tolerance = 6):
-
+    """
+    Reduce the vertices of a set of polygons
+    """
     # Smooth the polygons by first apply an erosion-dilatation
     polygons['geometry'] = polygons.apply(lambda row: row.geometry.buffer(distance=rayon_buffer).buffer(distance=-rayon_buffer),axis=1)
 
@@ -223,7 +205,35 @@ def cropLayerFromExtent(
         target_layer : str | gpd.GeoDataFrame,
         extent_feature : shapely.Polygon) -> gpd.GeoDataFrame :
     """
-    Return a geodataframes with the row contained inside the extent
+    Return a geodataframes with the features contained inside the extent
     """
     target_layer = Open(target_layer)
     return target_layer[target_layer.within(extent_feature)]
+
+def getNeighbors(point, population, dist):
+    z = point.buffer(dist)
+    vs = population[(population.within(z)) & (~population.geom_equals(point))]
+    return vs
+    
+def save(target, filepath, layername=None, epsg=None, driver='gpkg'):
+
+    """
+    Funnel between an object containing one or many geometric objects and a vector file .gpkg or .shp
+    """
+
+    # Build a geodataframe
+    target = getGeoDf(target, epsg=epsg)
+
+    # Check the consistency of 
+    if not filepath.endswith(driver):
+        if not driver.startswith('.'):
+            driver = '.' + driver
+        filepath += f"{driver}"
+
+    if layername is None:
+        target.to_file(filepath, layer=layername)
+    else:
+        target.to_file(filepath)
+
+    if Path(filepath).exists():
+        print(f"{Path(filepath).name} ok")
