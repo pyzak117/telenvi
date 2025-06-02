@@ -250,7 +250,7 @@ array type : {self.array.dtype}""")
         row1, col1, row2, col2 = indexes
 
         # Extract the array part between thoses indexes
-        new_array = target.array[row1:row2, col1:col2]
+        new_array = target.array
 
         # Assign this new array to the Geoim
         target.setArray(new_array)
@@ -343,15 +343,9 @@ array type : {self.array.dtype}""")
         elif type(vector) in (gpd.GeoSeries, pd.core.series.Series):
             vector = gpd.GeoDataFrame([vector])
 
-        elif type(vector) in (shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon):
+        # Or from a shapely polygonal geometry
+        elif type(vector) in (shapely.geometry.multipolygon.MultiPolygon, shapely.geometry.polygon.Polygon, shapely.geometry.collection.GeometryCollection):
             vector = gpd.GeoDataFrame([{'geometry':vector}]).set_crs(epsg=epsg)
-
-        # Then set is crs to be the same than the Geoim
-        # vector.set_crs(epsg=epsg, allow_override=True, inplace=True)
-        # This line raise a warning
-
-        # Find the vector epsg
-        epsg = vector.crs.to_epsg()
 
         # Select the features intersecting the image geo-extent
         vector = vector[vector["geometry"].intersects(self.drawGeomExtent(geomType="shly")) == True].copy()
@@ -421,16 +415,42 @@ array type : {self.array.dtype}""")
         if type(self.array) == ma.core.MaskedArray:
             self.array = self.array.data
 
-    def median(self, band=0):
+    def min(self, band=None):
+        """
+        compute the raster min or a band min if multispectral. 
+        The argument 'band' is refering to matrixian indexes, so the
+        band 1 have the index 0.
+        """
+        print('call to geoim min')
+        print(type(self.array))
+        if band is None:
+            return ma.min(self.array)
+        else:
+            return ma.min(self.array[band])
+
+    def max(self, band=None):
+        """
+        compute the raster max or a band max if multispectral. 
+        The argument 'band' is refering to matrixian indexes, so the
+        band 1 have the index 0.
+        """
+        print('call to geoim max')
+        print(type(self.array))
+        if band is None:
+            return ma.max(self.array)
+        else:
+            return ma.max(self.array[band])
+        
+    def median(self, band=None):
         """
         compute the raster median or a band median if multispectral. 
         The argument 'band' is refering to matrixian indexes, so the
         band 1 have the index 0.
         """
-        if type(self.array) in [np.ndarray]:
-            return np.median(self.array)
-        elif type(self.array) == ma.core.MaskedArray:
+        if band is None:
             return ma.median(self.array)
+        else:
+            return ma.median(self.array[band])
 
     def mean(self, band=0):
         """
@@ -490,7 +510,7 @@ array type : {self.array.dtype}""")
 
             return bands
 
-    def show(self, index=None, band=0, cmap="viridis", bar=True, vmin=None, vmax=None):
+    def show(self, band=0, cmap="viridis", bar=True, vmin=None, vmax=None, ax=None, figsize=None):
 
         """
         :descr:
@@ -510,37 +530,34 @@ array type : {self.array.dtype}""")
             None
         """
 
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize)
+
         # Compute nCols and nRows
         nBands, nRows, nCols=self.getShape()
-        if index == None:
-            row1, col1, row2, col2 = 0, 0, nRows-1, nCols-1
-        else:
-            row1, col1, row2, col2 = index
 
         # Plot
         if nBands > 1:
-            plt.imshow(self.array[band][row1:row2, col1:col2], cmap=cmap)
+            ax.imshow(self.array[band], cmap=cmap)
 
             if vmin is not None and vmax is not None:
-                plt.imshow(self.array[band][row1:row2, col1:col2], cmap=cmap, vmin=vmin, vmax=vmax)
+                ax.imshow(self.array[band], cmap=cmap, vmin=vmin, vmax=vmax)
 
         else:
-            plt.imshow(self.array[row1:row2, col1:col2], cmap=cmap)
+            ax.imshow(self.array, cmap=cmap)
             if vmin is not None and vmax is not None:
-                plt.imshow(self.array[row1:row2, col1:col2], cmap=cmap, vmin=vmin, vmax=vmax)
+                ax.imshow(self.array, cmap=cmap, vmin=vmin, vmax=vmax)
 
         if bar:
-            plt.colorbar()
+            plt.colorbar(ax.images[-1], ax=ax)
+        # plt.show()
+        return ax
 
-        plt.show()
-        plt.close()
-        return None
-
-    def save(self, outpath, mask = False):
+    def save(self, outpath, mask = False, verbose=True):
         if mask:
-            rt.write(self.ds, outpath, self.mask_value)
+            rt.write(self.ds, outpath, self.mask_value, verbose=verbose)
         else:
-            rt.write(self.ds, outpath)
+            rt.write(self.ds, outpath, verbose=verbose)
 
     def rgbVisual(self, colorMode=[0,1,2], resize_factor=1, brightness=1, show=False, path=None):
 
@@ -757,5 +774,42 @@ array type : {self.array.dtype}""")
         values = [self.inspectGeoLine(rib) for rib in ribs]
         return values
 
+    def getCardiPointsFromAspect(self):
+        """
+        Self should represent an aspect raster
+        """
+        return rt.getCardinalArrayFromAspect(self)
+
     def vectorize(self):
         return rt.vectorize(self.ds)
+
+    def show_on_map(self, source=vt.swissIm, epsg=2056, alpha=0.3, cmap=None, vmin=None, vmax=None, buffer=0, ax=None, figsize=(5,5), rgb_mode=False):
+
+        # Create an empty ax to draw        
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize)
+
+        # Get the extent of the image and rearrange it to follow the imshow extent standard
+        xMin, yMin, xMax, yMax = self.getGeoBounds()
+        geobounds = (xMin, xMax, yMin, yMax)
+
+        # Add a map background with the geoExtent as geotarget
+        if source is not None:
+            vt.add_wmts_layer(
+            source=source,
+            ax=ax,
+            geo_target=self.drawGeomExtent('shly'),
+            geo_target_alpha=0,
+            epsg=epsg)
+
+        # Manage multi-band
+        if self.getShape()[0] > 0:
+            ar_to_show = self.rgbVisual()
+        else:
+            ar_to_show = self.array
+
+        # Show the image on the axis
+        ax.imshow(ar_to_show, cmap=cmap, vmin=vmin, vmax=vmax, extent=geobounds, alpha=alpha)
+
+        # Send the axis
+        return ax

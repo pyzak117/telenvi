@@ -17,6 +17,7 @@ import json
 import pathlib
 import warnings
 from pathlib import Path
+import sys
 
 # CLI libraries
 from tqdm import tqdm
@@ -25,13 +26,15 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
+# Dataviz libraries
+from matplotlib import pyplot as plt
+
 # Geo libraries
 import shapely
 import rasterio
 from rasterio.features import shapes
 from shapely.errors import ShapelyDeprecationWarning
-
-# import richdem as rd
+import richdem as rd
 import geopandas as gpd
 from osgeo import gdal, gdalconst, osr, ogr
 
@@ -41,6 +44,7 @@ from osgeo import gdal, gdalconst, osr, ogr
 # --------------
 """
 
+    
 def getDs(target, mode=''):
 
     if mode == 'rasterio':
@@ -496,7 +500,7 @@ def resize(target, outpath ="", xRes = None, yRes = None, model = None, method =
     
     return ds_resized
 
-def reproj(target, crs = None, outpath = ""):
+def reproj(target, in_crs = None, ou_crs = None, outpath = ""):
     """
     change the spatial projection of a raster
 
@@ -514,12 +518,15 @@ def reproj(target, crs = None, outpath = ""):
     """
     target = getDs(target)
 
-    if type(crs) == int:
-        crs = getWktFromEpsg(crs)
+    if type(in_crs) == int:
+        in_crs = getWktFromEpsg(in_crs)
 
+    if type(ou_crs) == int:
+        ou_crs = getWktFromEpsg(ou_crs)
+    
     driverName = getDriverNameFromPath(outpath)
 
-    return gdal.Warp("", target, format=driverName, dstSRS=crs)
+    return gdal.Warp("", target, srcSRS=in_crs, dstSRS=ou_crs, format=driverName)
 
 def pickBands(target, bands, outpath=""):
     """
@@ -719,7 +726,7 @@ def create(
 
     return newds
 
-def write(target, outpath, ndValue=None):
+def write(target, outpath, ndValue=None, verbose=True):
     """
     create osgeo.gdal.Dataset from an array and geographic informations (optionnals)
 
@@ -742,12 +749,14 @@ def write(target, outpath, ndValue=None):
     driver.CreateCopy(outpath, target, 1)
 
     if gdal.Open(outpath) != None:
-        print(f"{os.path.basename(outpath)} OK")
+        if verbose:
+            print(f"{os.path.basename(outpath)} OK")
         return True
     else:
-        print(f"error during {os.path.basename(outpath)} creation")
+        if verbose:
+            print(f"error during {os.path.basename(outpath)} creation")
         return False    
-
+    
 def vectorize(target, mode='points'):
 
     # Read the target
@@ -1047,6 +1056,47 @@ def getAspect(dem):
 
     return aspect
 
+def getCardinalArrayFromAspect(aspect):
+    """
+    reclassify an aspect raster:
+    -1:no_data, 1:N, 2:NE, 3:E, 4:SE, 5:S, 6:SW, 7:W, 8:NW
+    N = >=337 or <22
+    NE = >= 22 or < 67
+    Etc...
+    """
+    # Load the data
+    if not type(aspect) == geoim.Geoim:
+        aspect = Open(aspect, load_pixels=True)
+
+    aspect_ar = aspect.array
+
+    # Define thresholds
+    conditions = [
+        (aspect_ar > 360)  | (aspect_ar < 0),
+        (aspect_ar >= 337) | (aspect_ar < 22),
+        (aspect_ar >= 22)  & (aspect_ar < 67),
+        (aspect_ar >= 67)  & (aspect_ar < 102),
+        (aspect_ar >= 102) & (aspect_ar < 157),
+        (aspect_ar >= 157) & (aspect_ar < 202),
+        (aspect_ar >= 202) & (aspect_ar < 247),
+        (aspect_ar >= 247) & (aspect_ar < 292),
+        (aspect_ar >= 292) & (aspect_ar < 337)
+        ]
+
+    # Define outputs values
+    categories = [-1, 1, 2, 3, 4, 5, 6, 7, 8]
+
+    # Process
+    cardi_array = np.select(conditions, categories, default=np.nan)
+
+    # Return
+    if type(aspect) == geoim.Geoim or str:
+        cardi = aspect.copy()
+        cardi.array = cardi_array
+        return cardi
+    else:
+        return cardi_array
+
 def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt']):
     """
     Map the extents of the rasters contained in a directory
@@ -1058,10 +1108,11 @@ def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt']):
     targets_paths = []
     for xt in extensions:
         xt = xt.removeprefix('.')
-        targets_paths += list(target_dir_path.glob(f'*{xt}'))
+        targets_paths += list(target_dir_path.glob(f'**/*.{xt}'))
 
     # Write their filepaths in a geodataframe
     geo_extents = pd.DataFrame([{'filepath':str(path)} for path in targets_paths])
+    geo_extents['geometry'] = ''
 
     # Map their extents
     geo_extents['geometry'] = geo_extents.apply(lambda row: drawGeomExtent(row.filepath, 'shly'), axis=1)
@@ -1089,25 +1140,87 @@ def OpenFromMultipleTargets(
         tracks_metamap = vt.Open(target_source)
     else:
         tracks_metamap = getRastermap(target_source)
-
-    # Here we find the tracks intersecting the rock glacier outlines
+    
+    # Here we find the tracks intersecting the area_of_interest
     tracks_metadata = tracks_metamap[tracks_metamap.intersects(area_of_interest)==True]
 
-    # Crope each dems intersecting the rock glacier
-    tracks_ds = [Open(track.filepath, load_pixels=False, geoExtent=area_of_interest) for track in tracks_metadata.iloc]
+    # Crope each dems intersecting the area_of_interest + resampling
+    tracks_ds = [Open(track.filepath, load_pixels=False, geoExtent=area_of_interest, nRes=nRes) for track in tracks_metadata.iloc]
+    
+    # Get the number of bands of the inputs
+    num_bands = getShape(tracks_ds[0])[0]
+    
+    # Si raster multispectral : gdal.merge ne fonctionne pas
+    if num_bands > 1:
+    
+        # Donc, on va appeler merge sur chaque bande
+        # Ca nous donne trois images
+        # Monospectrale
+        # Représentant chacune une zone géographique de l'image
+        merged_stacked = []
+        for b in range(num_bands):
+            rasters_monospectraux = [Open(t, nBands=b+1) for t in tracks_ds]
 
-    # Merge
-    tracks_merged = merge(tracks_ds)
+            # Donc on les assemble et on y ajoute à la liste stack
+            merged_stacked.append(merge(rasters_monospectraux))
 
-    # return tracks_merged
+        # Et là on stacke le tout pour récupérer du multispectral
+        merged_ds = stack(merged_stacked)
+
+    # Sinon : on merge tout
+    else:
+        merged_ds = merge(tracks_ds)
 
     # Resampling if needed
     if nRes is not None:
-        tracks_merged = resize(tracks_merged, xRes=nRes)
+        merged_ds = resize(merged_ds)
     
     # Loading
-    return Open(tracks_merged, load_pixels=load_pixels)
+    return Open(merged_ds, load_pixels=load_pixels)
 
+def show_geo_extent_on_map(target, map_source, geo_target_alpha, geo_target_color, geo_target_width, geo_target_linestyle):
+    geo_extent = drawGeomExtent(target, geomType='shly')
+    ax = vt.add_wmts_layer(
+        source=map_source,
+        geo_target=geo_extent,
+        geo_target_color=geo_target_color,
+        geo_target_alpha=geo_target_alpha,
+        geo_target_linestyle=geo_target_linestyle,
+        geo_target_linewidth=geo_target_width)
+    return ax
+
+# Here below some functions to display many arrays, quite adapted to the display of a bunch of insars
+def show_array(array, ax=None, title='', cmap='Greys', vmin=None, vmax=None):
+    if ax is None:
+        ax = plt.subplot()
+    ax.imshow(array, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_title(title)
+    return ax
+
+def show_pannel(arrays, titles=[], cmap='Greys_r', figsize=(16,4), vmin=None, vmax=None, savepath=None):
+
+    # Define the titles of each axis
+    if titles == []:
+        titles = ['' for t in arrays]
+
+    # Create an empty figure
+    fig, axes = plt.subplots(1, len(arrays), figsize=figsize)
+
+    # Iterate over the axes to create one figure per array to show
+    for i, ax in enumerate(axes):
+        show_array(arrays[i], ax, cmap=cmap, title=titles[i], vmin=vmin, vmax=vmax)
+    plt.tight_layout()
+
+    # Write the figure in a png file
+    if savepath is not None:
+        if not savepath.endswith('.png'):
+            savepath += '.png'
+        plt.savefig(savepath)
+        if Path(savepath).exists():
+            print(f"{savepath} ok")
+
+    return fig
+    
 #TODO if __name__ == "__main__":
 # 
 #     # There is a lot of work to do here

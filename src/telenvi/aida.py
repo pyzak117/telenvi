@@ -20,6 +20,23 @@ import shapely
 from osgeo import gdal
 import geopandas as gpd
 
+def geo_rgb_to_im_rgb(rgb_target):
+    """
+    Convert a rgb geo dataset to a rgb Pillow.Image object
+    """
+    assert rgb_target.getShape()[0] == 3, 'not a rgb target'
+
+    # Extract 3 independant bands
+    red_ar, green_ar, blue_ar = rgb_target.array
+    
+    # Convert them in 3 different Pillow Images objects
+    red_im, green_im, blue_im = [Image.fromarray(array).convert('L') for array in (red_ar, green_ar, blue_ar)]
+
+    # Stack them into one Pillow Image object
+    rgb_im_stack = Image.merge(mode='RGB', bands = (red_im, green_im, blue_im))
+
+    return rgb_im_stack
+    
 def rgb_im_to_geo_rgb(rgb_im, geo_template):
 
     rgb_im_array = get_array(rgb_im)[0]
@@ -261,6 +278,12 @@ def denoise_binary_image(binary_target, small_objects_min_size = 150, morpho_ope
 
 def get_binary_contours(binary_target, epsg=''):
 
+    """
+    Create a vector layer from a binary raster. Resulting polygons have an attribute 1 or 0.
+    binary_target : raster path or gdal.dataset or telenvi.Geoim, the raster to vectorize
+    epsg : int, the epsg of the output layer coordinates reference system
+    """
+    
     # Load data in a Geoim
     if type(binary_target) != geoim.Geoim:
         binary_target = rt.Open(binary_target, load_pixels=True)
@@ -302,7 +325,7 @@ def get_binary_contours(binary_target, epsg=''):
             out_point = shapely.Point((x,y))
             out_points.append(out_point)
 
-        # Bring the all in a shaped polygon
+        # Bring them all in a shaped polygon
         out_polygon = shapely.Polygon(out_points)
         geometries.append(out_polygon)
 
@@ -315,3 +338,50 @@ def get_binary_contours(binary_target, epsg=''):
         out_gdf = out_gdf.set_crs(epsg=epsg)
 
     return out_gdf
+
+
+def degrees_to_unit_vector(angle_degrees):
+    """
+    Convert an angle in degrees to a unit vector (x, y).
+    
+    Parameters:
+    angle_degrees (float): The angle in degrees.
+    
+    Returns:
+    vector (np.ndarray): A 2D unit vector corresponding to the given angle.
+    """
+    # Convert degrees to radians
+    angle_radians = np.deg2rad(angle_degrees)
+    
+    # Calculate the x and y components of the unit vector
+    x = np.cos(angle_radians)
+    y = np.sin(angle_radians)
+    
+    return np.array([x, y])
+
+def measure_direction_homogeneity(df, column_name='direction'):
+    """
+    Measure the homogeneity of directions given as angles in a DataFrame column 'direction'.
+    
+    Parameters:
+    df (pd.DataFrame): A DataFrame where each row contains a direction (angle in degrees) in the 'direction' column.
+    
+    Returns:
+    homogeneity (float): A measure of directional homogeneity (1.0 means all directions are the same).
+    """
+    # Convert angles (in degrees) to unit vectors
+    vectors = np.stack(df[column_name].apply(degrees_to_unit_vector).values)
+    
+    # Compute the mean direction vector
+    mean_direction = np.mean(vectors, axis=0)
+    
+    # Normalize the mean direction
+    mean_direction /= np.linalg.norm(mean_direction)
+    
+    # Compute cosine similarity between each vector and the mean direction
+    cosine_similarities = np.dot(vectors, mean_direction)
+    
+    # Calculate the average cosine similarity (homogeneity measure)
+    homogeneity = np.mean(cosine_similarities)
+    
+    return homogeneity
