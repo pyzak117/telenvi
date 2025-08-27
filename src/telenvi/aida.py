@@ -20,6 +20,13 @@ import shapely
 from osgeo import gdal
 import geopandas as gpd
 
+def geo_monoband_to_pil(mono_target):
+    """
+    Convert a monoband geo dataset to rgb Pillow.Image object
+    """
+    mono_target = rt.Open(mono_target, load_pixels=True)
+    return Image.fromarray(mono_target.array).convert('L')
+
 def geo_rgb_to_im_rgb(rgb_target):
     """
     Convert a rgb geo dataset to a rgb Pillow.Image object
@@ -36,6 +43,12 @@ def geo_rgb_to_im_rgb(rgb_target):
     rgb_im_stack = Image.merge(mode='RGB', bands = (red_im, green_im, blue_im))
 
     return rgb_im_stack
+    
+def mono_im_to_geo_mono(mono_im, geo_template):
+    im_array = get_array(mono_im)[0]
+    geomono = geo_template.copy()
+    geomono.array = im_array
+    return geomono
     
 def rgb_im_to_geo_rgb(rgb_im, geo_template):
 
@@ -109,7 +122,7 @@ def get_array(input_target):
         output_array = input_target.array
         input_is_geoim = True
     
-    elif type(input_target) == Image:
+    elif type(input_target) == Image.Image:
         output_array = np.array(input_target)
         
     elif type(input_target) == np.ndarray:
@@ -276,7 +289,7 @@ def denoise_binary_image(binary_target, small_objects_min_size = 150, morpho_ope
     
     return filtered_regions
 
-def get_binary_contours(binary_target, epsg=''):
+def get_binary_contours_bis(binary_target, epsg=''):
 
     """
     Create a vector layer from a binary raster. Resulting polygons have an attribute 1 or 0.
@@ -338,7 +351,6 @@ def get_binary_contours(binary_target, epsg=''):
         out_gdf = out_gdf.set_crs(epsg=epsg)
 
     return out_gdf
-
 
 def degrees_to_unit_vector(angle_degrees):
     """

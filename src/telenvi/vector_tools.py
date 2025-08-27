@@ -13,6 +13,9 @@ import numbers
 import contextily as cx
 from matplotlib import pyplot as plt
 from shapely.ops import polygonize
+from osgeo import gdal, ogr, osr
+
+import math
 
 swissTopoMap = cx.providers.SwissFederalGeoportal.NationalMapColor
 swissTopoMapGr = cx.providers.SwissFederalGeoportal.NationalMapGrey
@@ -361,7 +364,7 @@ def draw_geo_boundaries(geo_target, ax=None, epsg=3857, geo_target_color='black'
     geo_target.boundary.plot(ax=ax, linewidth=geo_target_linewidth, color=geo_target_color, alpha=geo_target_alpha, linestyle=geo_target_linestyle)
     return ax
 
-def add_wmts_layer(geo_target, source=cx.providers.SwissFederalGeoportal.SWISSIMAGE, ax=None, epsg=3857, figsize=(5,5), geo_target_color='black', geo_target_linestyle='dashed', geo_target_linewidth=0.5, geo_target_alpha=1, expand_extent_x=0, expand_extent_y=0):
+def add_wmts_layer(geo_target, source=cx.providers.SwissFederalGeoportal.SWISSIMAGE, ax=None, epsg=3857, figsize=(5,5), geo_target_color='black', geo_target_linestyle='dashed', geo_target_linewidth=0.5, geo_target_alpha=1, expand_extent_x=0, expand_extent_y=0, mask_outside_geo_target=False, mask_color=None, mask_alpha=None):
     """
     Add a WMTS layer on a pyplot ax. Source is either a cx.providers object, or a URL string.
     Sources:
@@ -385,6 +388,15 @@ def add_wmts_layer(geo_target, source=cx.providers.SwissFederalGeoportal.SWISSIM
 
     # Add the map background
     cx.add_basemap(ax=ax, source=source, crs=epsg)
+
+    # Mask outside of the area
+    if mask_outside_geo_target:
+        add_white_mask_to_map(
+            area_of_interest=geo_target,
+            ax=ax,
+            mask_color=mask_color,
+            mask_alpha=mask_alpha)
+
     return ax
 
 def anim_on_swiss_aerial_imagery(geo_target, epsg=3857, b_inf=None, b_sup=2024, step=5, years=None, figsize=(5,5), geo_target_color='black', geo_target_linestyle='dashed', geo_target_linewidth=0.5, geo_target_alpha=1):
@@ -464,7 +476,7 @@ def spatial_selection(left, right, cols_to_keep=[], predicate='within'):
     content_cleaned = joined.drop(columns_to_drop, axis=1)
     return content_cleaned
 
-def get_geogrid(extent_layer, cell_width=100, cell_height=100, clip=False):
+def get_geogrid(extent_layer, cell_width=100, cell_height=100, clip=False, epsg=2056):
     """
     Send a grid of cells based on the given extent
     extent should be a geodataframe containing one or many features
@@ -510,7 +522,7 @@ def get_geogrid(extent_layer, cell_width=100, cell_height=100, clip=False):
         XrightOrigin = XrightOrigin + cell_width
 
     # Build a geodataframe
-    geogrid = gpd.GeoDataFrame({'geometry':polygons}).set_crs(epsg=3857)
+    geogrid = gpd.GeoDataFrame({'geometry':polygons}).set_crs(epsg=epsg)
 
     # Clip if needed
     if clip:
@@ -594,3 +606,96 @@ def create_hex_grid(gdf=None, bounds=None, n_cells=10, overlap=False, crs="EPSG:
         cols = ['grid_id','geometry','grid_area']
         grid = grid.sjoin(gdf, how='inner').drop_duplicates('geometry')
     return grid
+
+def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte):
+    """
+    Rasterizes a GeoDataFrame of polygons into a numpy array.
+
+    Parameters:
+    - gdf: GeoDataFrame with polygon geometries (must be in EPSG:2056)
+    - pixel_size: size of each output pixel (in map units, default 10m)
+    - burn_value: value to burn into the raster (default: 1)
+    - out_dtype: GDAL data type (default: gdal.GDT_Byte)
+
+    Returns:
+    - raster: 2D numpy array
+    - transform: GDAL geotransform tuple
+    """
+
+    # Reproject to EPSG:2056 if necessary
+    if gdf.crs.to_epsg() != 2056:
+        gdf = gdf.to_crs(2056)
+
+    # Get bounds
+    minx, miny, maxx, maxy = gdf.total_bounds
+
+    # Calculate raster dimensions
+    cols = math.ceil((maxx - minx) / pixel_size)
+    rows = math.ceil((maxy - miny) / pixel_size)
+
+    # Create transform (geotransform)
+    transform = (minx, pixel_size, 0, maxy, 0, -pixel_size)
+
+    # Create in-memory raster
+    mem_drv = gdal.GetDriverByName('MEM')
+    mem_raster = mem_drv.Create('', cols, rows, 1, out_dtype)
+    mem_raster.SetGeoTransform(transform)
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(2056)
+    mem_raster.SetProjection(srs.ExportToWkt())
+
+    # Create OGR layer
+    drv = ogr.GetDriverByName('Memory')
+    data_source = drv.CreateDataSource('memData')
+    layer = data_source.CreateLayer('layer', srs, ogr.wkbPolygon)
+
+    # Add features
+    for _, row in gdf.iterrows():
+        feature = ogr.Feature(layer.GetLayerDefn())
+        geom = ogr.CreateGeometryFromWkb(row.geometry.wkb)
+        feature.SetGeometry(geom)
+        layer.CreateFeature(feature)
+
+    # Rasterize all geometries with burn_value
+    gdal.RasterizeLayer(mem_raster, [1], layer, burn_values=[burn_value])
+
+    return mem_raster
+
+def summarize_raster_values_into_vector_layer(vector_layer, raster, column_name = "raster_median"):
+    """
+    Apply a function for each vector feature to compute the median value of the pixels within the feature
+    """
+    vector_layer[column_name] = vector_layer.apply(lambda row: np.median(np.array(raster.inspectGeoPolygon(row.geometry))), axis=1)
+    return vector_layer    
+
+def add_white_mask_to_map(area_of_interest, ax, mask_color='white', mask_alpha=0.9):
+    """
+    Add a white mask outside of the area of interest, within the bounds of ax.
+
+    Parameters:
+    - area_of_interest: a GeoDataFrame or a shapely geometry defining the area of interest
+    - ax: the matplotlib Axes object to apply the mask on
+
+    Returns:
+    - ax: the same matplotlib Axes object with the white mask applied
+    """
+    # Get the bounds of the current axis
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    bounds = shapely.geometry.box(xlim[0], ylim[0], xlim[1], ylim[1])  # outer rectangle
+
+    # Ensure area_of_interest is a GeoSeries
+    if isinstance(area_of_interest, gpd.GeoDataFrame):
+        aoi_geom = area_of_interest.unary_union
+    else:
+        aoi_geom = area_of_interest  # assume it's already a shapely geometry
+
+    # Subtract the AOI from the full bounds to get the mask geometry
+    mask_geom = bounds.difference(aoi_geom)
+
+    # Create a GeoSeries for the mask and plot it
+    mask = gpd.GeoSeries(mask_geom)
+    mask.plot(ax=ax, color=mask_color, zorder=10, alpha=mask_alpha)
+
+    return ax

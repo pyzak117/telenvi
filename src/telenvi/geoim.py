@@ -199,6 +199,7 @@ array type : {self.array.dtype}""")
         """
         vector : shapely.geometry.polygon.Polygon or str - path to a shapefile
         polygon : id of the feature, if vector is a shapefile
+        TODO : Cette fonction ne marche pas. Il faut passer par la rt.cropFromVector.
         """
         
         # We get the polygon geo extent
@@ -783,7 +784,10 @@ array type : {self.array.dtype}""")
     def vectorize(self):
         return rt.vectorize(self.ds)
 
-    def show_on_map(self, source=vt.swissIm, epsg=2056, alpha=0.3, cmap=None, vmin=None, vmax=None, buffer=0, ax=None, figsize=(5,5), rgb_mode=False):
+    def show_on_map(self, epsg=2056, alpha=1, cmap=None, vmin=None, vmax=None, ax=None, figsize=(5,5), bar=True, buffer=0):
+        """
+        Show the raster but in a plot with georeferenced axis, not with the number of pixels
+        """
 
         # Create an empty ax to draw        
         if ax is None:
@@ -791,25 +795,28 @@ array type : {self.array.dtype}""")
 
         # Get the extent of the image and rearrange it to follow the imshow extent standard
         xMin, yMin, xMax, yMax = self.getGeoBounds()
+
+        # Apply the buffer
+        xMin -= buffer
+        xMax += buffer
+        yMin -= buffer
+        yMax += buffer
+
+        # Tuple it
         geobounds = (xMin, xMax, yMin, yMax)
 
-        # Add a map background with the geoExtent as geotarget
-        if source is not None:
-            vt.add_wmts_layer(
-            source=source,
-            ax=ax,
-            geo_target=self.drawGeomExtent('shly'),
-            geo_target_alpha=0,
-            epsg=epsg)
-
         # Manage multi-band
-        if self.getShape()[0] > 0:
+        if self.getShape()[0] > 1:
             ar_to_show = self.rgbVisual()
         else:
             ar_to_show = self.array
 
         # Show the image on the axis
         ax.imshow(ar_to_show, cmap=cmap, vmin=vmin, vmax=vmax, extent=geobounds, alpha=alpha)
+
+        # Show the legend bar
+        if bar:
+            plt.colorbar(ax.images[-1], ax=ax)
 
         # Send the axis
         return ax

@@ -736,6 +736,8 @@ def write(target, outpath, ndValue=None, verbose=True):
                   facultative : an outpath to write the raster somewhere
     """
     
+    outpath = str(outpath)
+
     # Create driver
     driverName = getDriverNameFromPath(outpath)
     driver = gdal.GetDriverByName(driverName)
@@ -978,6 +980,7 @@ def Open(
 
     def _resample(inDs, nRes, resMethod):
         if nRes != None:
+            
             if verbose: print(f"resample\n---\nin     : {getPixelSize(inDs)[0]}\nout    : {nRes}\nmethod : {resMethod}\n---\n")
             inDs=resize(inDs, xRes=nRes, yRes=nRes, method=resMethod)
         return inDs
@@ -1012,10 +1015,23 @@ def getRasterioDs(target):
     """
     pass
 
-def getSlope(dem):
-    """
-    Compute slope in degrees from a dem 
-    """
+def getCurvature(dem):
+    """Compute curvature from richdem algorithm from a dem"""
+
+    # Pre process the dem
+    dem, dem_rdarray = preProcessDem(dem)
+
+    # Compute curvature
+    curv_array = np.array(rd.TerrainAttribute(dem_rdarray, attrib = "curvature"))
+
+    # Create a geoim with this array and the same dataset than the initial dem
+    curv = geoim.Geoim(dem.ds, curv_array)
+
+    return curv
+
+
+def preProcessDem(dem):
+    """Pre process a dem array before sending it to Richdem"""
 
     # Load the data
     if not type(dem) == geoim.Geoim:
@@ -1026,7 +1042,17 @@ def getSlope(dem):
     dem_rdarray.geotransform = dem.ds.GetGeoTransform()
     dem_rdarray.projection = dem.ds.GetProjection()
 
-    # Compute slope and conert in degrees unit
+    return dem, dem_rdarray
+
+def getSlope(dem):
+    """
+    Compute slope in degrees from a dem 
+    """
+
+    # Pre process the dem
+    dem, dem_rdarray = preProcessDem(dem)
+
+    # Compute slope and convert in degrees unit
     slope_deg = np.array(np.degrees(np.arctan(rd.TerrainAttribute(dem_rdarray, attrib = "slope_riserun"))))
 
     # Create a geoim with this array and the same dataset than the initial dem
@@ -1039,16 +1065,10 @@ def getAspect(dem):
     Compute aspect in degrees from a dem 
     """
 
-    # Load the data
-    if not type(dem) == geoim.Geoim:
-        dem = Open(dem, load_pixels=True)
+    # Pre process the dem
+    dem, dem_rdarray = preProcessDem(dem)
 
-    # Convert the GeoIm numpy.ndarray to richdem.rdarray (pre-processing before aspect computing)
-    dem_rdarray = rd.rdarray(dem.array, no_data=-9999)
-    dem_rdarray.geotransform = dem.ds.GetGeoTransform()
-    dem_rdarray.projection = dem.ds.GetProjection()
-
-    # Compute aspect and conert in degrees unit
+    # Compute aspect and convert in degrees unit
     aspect_deg = np.array(rd.TerrainAttribute(dem_rdarray, attrib = "aspect"))
 
     # Create a geoim with this array and the same dataset than the initial dem
