@@ -10,6 +10,13 @@ import numpy as np
 from skimage import morphology
 from skimage import measure
 from sklearn import cluster
+from scipy import stats
+from sklearn.metrics import r2_score
+from sklearn.linear_model import LinearRegression
+
+# Visualisation libraries
+from matplotlib import pyplot as plt
+import seaborn as sns
 
 # Image processing
 import cv2
@@ -397,3 +404,89 @@ def measure_direction_homogeneity(df, column_name='direction'):
     homogeneity = np.mean(cosine_similarities)
     
     return homogeneity
+
+def explore_linear_relation(x=None, y=None, title='linear data visualisation', x_label='factor', y_label='target', figsize=None, get_mad=False, data=None, hue=None, palette_dict=None, hue_order=None, s=1, alpha=None, ax=None, pts_color='black', reg_line_color='red', reg_line_width=1, scores_text_color='black'):
+
+    # Data creation
+    if x is None:
+        x = np.array([1, 2, 3, 4, 5, 6])
+    if y is None:
+        y = np.array([0, 3, 2, 5, 4.8, 5.8])
+
+    if data is not None:
+        assert ValueError('x and y must be strings if data is not None')
+        if x_label == 'factor':
+            x_label = x
+        if y_label == 'target':
+            y_label = y
+        x = data[x].values
+        y = data[y].values
+
+    # Pre-process
+    if len(x.shape) != 2:
+        x=x.reshape(-1,1)
+
+    # Create the figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+
+    if data is None:
+        sns.scatterplot(x=x.flatten(),y=y, ax=ax, color=pts_color, s=s)
+    else:
+        sns.scatterplot(data=data, x=x_label, y=y_label,ax=ax, color=pts_color, palette=palette_dict, s=s, hue=hue, hue_order=hue_order, alpha=alpha)
+
+    ax.set_title(title)
+
+    # Linear Regression
+    model = LinearRegression().fit(x,y)
+    r_sq = model.score(x, y)
+
+    # Show a new figure with the regression line
+    y_predicteds = model.predict(x)
+    sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width)
+
+    # Add the differences between reg line and the real values
+    xs = x.flatten()
+    y_true = y
+    y_pred = y_predicteds
+    foo = 0
+    if get_mad :
+        for i, x_val in enumerate(xs):
+            xs_pos = [x_val, x_val]
+            ys_pos = [y_true[i], y_pred[i]]
+        
+            # On en profite pour calculer l'Erreur Moyenne Absolue
+            foo = foo + abs(y_pred[i] - y_true[i])
+
+            # On trace les petites lignes
+            # TODO : pourquoi elles sont petites ? Linewidth ne change rien. 
+            sns.lineplot(x=xs_pos, y=ys_pos, color=reg_line_color, ax=ax)
+
+        # Complète le calcul du MAD ou Mean Absolute Deviation
+        mad = foo / len(x)
+        print(f"MAD : {mad}")
+
+
+    # First evaluation of the correlation between X and Y
+    r2_val = r2_score(y_true=y_true, y_pred=y_pred)
+    spearman_val, spearman_p = stats.spearmanr(x, y)
+    try:
+        textstr = f"r2: {r2_val.round(2)}\nspearman xy: {spearman_val.round(2)} (p={spearman_p.round(2)})"
+
+        # Dynamically set position to bottom right using axis bounds
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
+        y_pos = ylim[0] + 0.02 * (ylim[1] - ylim[0])
+        ax.text(x_pos, y_pos, textstr, fontsize=10,
+                verticalalignment='bottom', horizontalalignment='right', color=scores_text_color,
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+    except AttributeError:
+        pass 
+
+
+    # Add titles and legends
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+
+    return ax

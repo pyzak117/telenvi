@@ -820,3 +820,12 @@ array type : {self.array.dtype}""")
 
         # Send the axis
         return ax
+
+    def compute_med_value_in_georow(self, georow):
+        """
+        Return the median value of the raster within the polygon
+        TODO : handle the multi-band rasters geoims
+        """
+        med_value_in_georow = np.median(np.array(self.inspectGeoPolygon(georow.geometry)))
+        return med_value_in_georow
+

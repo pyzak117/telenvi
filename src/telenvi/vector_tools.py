@@ -699,3 +699,179 @@ def add_white_mask_to_map(area_of_interest, ax, mask_color='white', mask_alpha=0
     mask.plot(ax=ax, color=mask_color, zorder=10, alpha=mask_alpha)
 
     return ax
+
+def add_north_arrow(ax, size=0.1, location=(0.1, 0.9), color='black'):
+    """
+    Add a north arrow to a matplotlib Axes.
+
+    Parameters:
+    - ax: the matplotlib Axes object to add the north arrow to
+    - size: size of the north arrow as a fraction of the Axes height (default: 0.1)
+    - location: (x, y) tuple as fractions of Axes width/height (center of arrow)
+    - color: color of the north arrow (default: 'black')
+
+    Returns:
+    - ax: the same matplotlib Axes object with the north arrow added
+    """
+    from matplotlib.patches import FancyArrow
+
+    loc_x, loc_y = location
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    arrow_length = size * (ylim[1] - ylim[0])
+
+    # Center the arrow at loc_x, loc_y
+    x_pos = xlim[0] + loc_x * (xlim[1] - xlim[0])
+    y_pos = ylim[0] + loc_y * (ylim[1] - ylim[0]) - arrow_length / 2
+
+    arrow = FancyArrow(
+        x_pos, y_pos, 0, arrow_length,
+        width=arrow_length * 0.1,
+        head_width=arrow_length * 0.2,
+        head_length=arrow_length * 0.2,
+        length_includes_head=True,
+        color=color
+    )
+    ax.add_patch(arrow).set_zorder(101)
+    ax.text(
+        x_pos, y_pos + arrow_length + (arrow_length * 0.1), 'N',
+        horizontalalignment='center', verticalalignment='bottom',
+        fontsize=12, color=color
+    ).set_zorder(101)
+    return ax
+
+def add_scale_bar(ax, length, location=(0.5, 0.05), linewidth=3, text_offset=0.02, units='m', color='black', fontsize=10):
+    """
+    Add a scale bar to a matplotlib Axes.
+
+    Parameters:
+    - ax: the matplotlib Axes object to add the scale bar to
+    - length: length of the scale bar in map units (e.g., meters)
+    - location: tuple (x, y) specifying the center of the scale bar as a fraction of the Axes width and height (default: (0.5, 0.05))
+    - linewidth: thickness of the scale bar line (default: 3)
+    - text_offset: vertical offset for the scale bar text as a fraction of the Axes height (default: 0.02)
+    - units: units to display next to the scale bar length (default: 'm')
+    - color: color of the scale bar and text (default: 'black')
+
+    Returns:
+    - ax: the same matplotlib Axes object with the scale bar added
+    """
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()        
+
+    # Center the scale bar at location
+    x_center = xlim[0] + location[0] * (xlim[1] - xlim[0])
+    y_pos = ylim[0] + location[1] * (ylim[1] - ylim[0])
+    x_start = x_center - length / 2
+    x_end = x_center + length / 2
+
+    ax.hlines(y=y_pos, xmin=x_start, xmax=x_end, colors=color, linewidth=linewidth).set_zorder(101)
+    if units == 'km':
+        length = length / 1000
+    ax.text(
+        x_center, y_pos + text_offset * (ylim[1] - ylim[0]), f'{int(length)} {units}',
+        horizontalalignment='center', verticalalignment='bottom',
+        fontsize=fontsize, color=color
+    ).set_zorder(101)
+    return ax 
+
+def add_scale_and_north(
+    ax,
+    x_loc=0.2, 
+    y_loc=0.15, 
+    gap_between_arrow_and_scale_bar=0.05, 
+    scale_bar_length=5000, 
+    scale_bar_units='m', 
+    north_arrow_size=0.1, 
+    north_arrow_color='black', 
+    scale_bar_color='black', 
+    scale_bar_fontsize=10):
+    """
+    Add a north arrow and a scale bar to a matplotlib Axes, vertically aligned together
+    """
+
+    ax = add_north_arrow(
+        ax, 
+        size=north_arrow_size, 
+        location=(x_loc, y_loc + gap_between_arrow_and_scale_bar + north_arrow_size / 2), 
+        color=north_arrow_color)
+
+    ax = add_scale_bar(
+        ax, 
+        length=scale_bar_length, 
+        location=(x_loc, y_loc), 
+        units=scale_bar_units, 
+        color=scale_bar_color, 
+        fontsize=scale_bar_fontsize)
+
+    return ax
+
+def count_coalescent_systems(gdf):
+    """
+    Count coalescent systems and classify them as single vs multi.
+    
+    Returns:
+        total_systems (int): Total number of systems
+        single_systems (int): Systems from exactly one original polygon
+        multi_systems (int): Systems formed by merging >1 polygon
+    """
+    # Assign a dummy column for dissolve
+    gdf["_tmp"] = 1
+    
+    # Dissolve all into one union, then explode into separate systems
+    dissolved = gdf.dissolve(by="_tmp")
+    exploded = dissolved.explode(index_parts=False)
+    
+    # Spatial join to see how many original polygons fall in each system
+    exploded = exploded.reset_index(drop=True)
+    joined = gpd.sjoin(gdf.drop(columns="_tmp"), exploded, predicate="intersects")
+    
+    # Count how many original polygons in each exploded system
+    counts = joined.groupby("index_right").size()
+    
+    total_systems = len(counts)
+    single_systems = (counts == 1).sum()
+    multi_systems = (counts > 1).sum()
+    
+    return total_systems, single_systems, multi_systems
+
+def get_cell_surf_covered_by_hue_vals(gdf, grid, hue):
+    """
+    For each grid cell, compute the percentage of its area covered by each value of `hue` in gdf.
+    
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        GeoDataFrame containing polygons and a categorical column `hue`.
+    grid : geopandas.GeoDataFrame
+        GeoDataFrame containing the grid cells.
+    hue : str
+        The name of the column in gdf with the categories.
+    
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Original grid with additional columns for each hue value (percent coverage).
+    """
+    # Ensure CRS match
+    if gdf.crs != grid.crs:
+        gdf = gdf.to_crs(grid.crs)
+    
+    # Compute intersection
+    intersections = gpd.overlay(grid.reset_index(), gdf[[hue, 'geometry']], how='intersection')
+    
+    # Compute area of intersection and original grid cells
+    intersections["area_intersection"] = intersections.geometry.area
+    grid_area = grid.geometry.area
+    intersections = intersections.rename(columns={"index": "grid_index"})
+    
+    # Compute percentage of cell covered by each hue
+    intersections["pct"] = intersections.apply(lambda row: row["area_intersection"] / grid_area[row["grid_index"]], axis=1)
+    
+    # Group by grid_index and hue
+    coverage = intersections.groupby(["grid_index", hue])["pct"].sum().unstack(fill_value=0)
+    
+    # Merge back into grid
+    result = grid.join(coverage, how="left").fillna(0)
+    
+    return result
