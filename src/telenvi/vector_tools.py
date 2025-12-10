@@ -1,3 +1,4 @@
+#%%
 module_description = """
 --- telenvi.vector_tools ---
 Functions to process vector geo data through geopandas
@@ -14,11 +15,13 @@ import contextily as cx
 from matplotlib import pyplot as plt
 from shapely.ops import polygonize
 from osgeo import gdal, ogr, osr
-
+from tqdm import tqdm
 import math
+from telenvi import raster_tools as rt
 
 swissTopoMap = cx.providers.SwissFederalGeoportal.NationalMapColor
 swissTopoMapGr = cx.providers.SwissFederalGeoportal.NationalMapGrey
+esri_hillshade = cx.providers.Esri.WorldShadedRelief
 swissIm = cx.providers.SwissFederalGeoportal.SWISSIMAGE
 esriIm = cx.providers.Esri.WorldImagery
 franceIm = cx.providers.GeoportailFrance.orthos
@@ -563,7 +566,6 @@ def get_total_bounds_gdf(target_layer, epsg):
     # GeoDataFrame
     return gpd.GeoDataFrame({'geometry':[geom]}).set_crs(epsg=epsg)
 
-
 def create_hex_grid(gdf=None, bounds=None, n_cells=10, overlap=False, crs="EPSG:29902"):
     """Hexagonal grid over geometry.
     See https://sabrinadchan.github.io/data-blog/building-a-hexagonal-cartogram.html
@@ -607,7 +609,7 @@ def create_hex_grid(gdf=None, bounds=None, n_cells=10, overlap=False, crs="EPSG:
         grid = grid.sjoin(gdf, how='inner').drop_duplicates('geometry')
     return grid
 
-def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte):
+def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte, load_pixels=True, extent=None):
     """
     Rasterizes a GeoDataFrame of polygons into a numpy array.
 
@@ -627,7 +629,10 @@ def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte):
         gdf = gdf.to_crs(2056)
 
     # Get bounds
-    minx, miny, maxx, maxy = gdf.total_bounds
+    if extent is not None:
+        minx, miny, maxx, maxy = extent.total_bounds
+    else:
+        minx, miny, maxx, maxy = gdf.total_bounds
 
     # Calculate raster dimensions
     cols = math.ceil((maxx - minx) / pixel_size)
@@ -659,6 +664,9 @@ def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte):
 
     # Rasterize all geometries with burn_value
     gdal.RasterizeLayer(mem_raster, [1], layer, burn_values=[burn_value])
+
+    if load_pixels:
+        return rt.Open(mem_raster, load_pixels=True)
 
     return mem_raster
 
@@ -857,21 +865,52 @@ def get_cell_surf_covered_by_hue_vals(gdf, grid, hue):
     if gdf.crs != grid.crs:
         gdf = gdf.to_crs(grid.crs)
     
-    # Compute intersection
-    intersections = gpd.overlay(grid.reset_index(), gdf[[hue, 'geometry']], how='intersection')
+    cells = []
+    # For each cell
+    for cell in tqdm(grid.iloc):
+        
+        new_cell = pd.Series(dtype='object')
+        new_cell['geometry'] = cell.geometry
+
+        # Pre-process the grid
+        cell_gdf = gpd.GeoDataFrame([new_cell]).set_crs(grid.crs)
+
+        # Spatial selection on the features
+        features = spatial_selection(gdf, cell_gdf, predicate='intersects')
+        features = features.clip(cell_gdf)
+
+        # For each cateogry to investigate
+        for v in gdf[hue].unique():            
+            
+            # Attribute selection
+            v_features = features[features[hue] == v]
+            x3 = len(v_features)
+            if len(v_features) > 0:
+
+                # Sum and surface occupied by the features in the grid in percent
+                ft_surf = v_features.area.sum()
+                part_cell_covered_by_ft = ft_surf / cell_gdf.area.iloc[0]
+                new_cell[v] = part_cell_covered_by_ft 
+            
+            else:
+                new_cell[v] = 0
+
+        cells.append(new_cell)
     
-    # Compute area of intersection and original grid cells
-    intersections["area_intersection"] = intersections.geometry.area
-    grid_area = grid.geometry.area
-    intersections = intersections.rename(columns={"index": "grid_index"})
-    
-    # Compute percentage of cell covered by each hue
-    intersections["pct"] = intersections.apply(lambda row: row["area_intersection"] / grid_area[row["grid_index"]], axis=1)
-    
-    # Group by grid_index and hue
-    coverage = intersections.groupby(["grid_index", hue])["pct"].sum().unstack(fill_value=0)
-    
-    # Merge back into grid
-    result = grid.join(coverage, how="left").fillna(0)
-    
-    return result
+    return gpd.GeoDataFrame(cells).set_crs(grid.crs)
+
+def get_surf_covered_by_contents_in_container(contents, container):
+    """
+    Return the sum of the surface covered by the contents (can be many features) within the container
+    contents : geodataframe
+    container : geodataframe - /!\ Must contain one feature
+    """
+    if len(container) > 1:
+        print('vector_tools here : container have more than 1 feature')
+    clipped_content = contents.clip(container)
+    return clipped_content.area.sum()
+
+def get_centroids(gdf):
+    foo = gdf.copy()
+    foo['geometry'] = gdf.geometry.centroid
+    return foo

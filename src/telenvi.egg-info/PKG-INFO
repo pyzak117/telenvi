@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: telenvi
 Version: 5.1
 Summary: Some remote sensing tricks from telenvi master students
@@ -12,6 +12,7 @@ Classifier: Operating System :: OS Independent
 Requires-Python: >=3.6
 Description-Content-Type: text/markdown
 License-File: LICENSE
+Dynamic: license-file
 
 # telenvi
 Some remote sensing tricks from telenvi master students.
