@@ -8,8 +8,6 @@ from telenvi import raster_tools as rt
 from telenvi import vector_tools as vt
 
 adminch_metadata_path = Path(Path(__file__).with_name('ressources'), 'metadata_admin-ch_valais.gpkg')
-swimage_metadata_layer = gpd.read_file(adminch_metadata_path, layer='cleaned-metadata-swiss-images-valais-detailled')
-sw3d_metadata_layer = gpd.read_file(adminch_metadata_path, layer='metadata_swiss-surface-3D_valais')
 
 def get_swimages(
     dest_repo,
@@ -32,7 +30,7 @@ def get_swimages(
     # Define a default metadata file location :
     # the one for the swissimages in valais
     if metadata_source is None:
-        metadata_source = swimage_metadata_layer
+        metadata_source = gpd.read_file(adminch_metadata_path, layer='cleaned-metadata-swiss-images-valais-detailled')
     
     # Open the metadata file
     metadata_df = vt.Open(metadata_source, metadata_layername, to_crs_epsg=2056)
@@ -97,10 +95,11 @@ def get_ss3d(
     dest_repo  : string or Path
     """
 
+
     # Define a default metadata file location :
     # the one for the swissimages in valais
     if metadata_source is None:
-        metadata_source = sw3d_metadata_layer
+        metadata_source = gpd.read_file(adminch_metadata_path, layer='metadata_swiss-surface-3D_valais')
     
     # Open the metadata file
     metadata_df = vt.Open(metadata_source, metadata_layername, to_crs_epsg=2056)

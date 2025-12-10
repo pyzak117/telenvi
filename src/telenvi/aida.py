@@ -1,11 +1,14 @@
+#%%
 # telenvi modules
 import telenvi.raster_tools as rt
 import telenvi.geoim as geoim
 
 # Standard libraries
 from tqdm import tqdm
+import string
 
 # Data libraries
+import pandas as pd
 import numpy as np
 from skimage import morphology
 from skimage import measure
@@ -13,9 +16,11 @@ from sklearn import cluster
 from scipy import stats
 from sklearn.metrics import r2_score
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import classification_report, confusion_matrix
 
 # Visualisation libraries
 from matplotlib import pyplot as plt
+from matplotlib.patches import Patch
 import seaborn as sns
 
 # Image processing
@@ -26,12 +31,14 @@ from PIL import Image, ImageFilter, ImageEnhance
 import shapely
 from osgeo import gdal
 import geopandas as gpd
+from matplotlib.patches import Patch
 
 def geo_monoband_to_pil(mono_target):
     """
     Convert a monoband geo dataset to rgb Pillow.Image object
     """
     mono_target = rt.Open(mono_target, load_pixels=True)
+    mono_target.array = mono_target.array.astype(np.float32)
     return Image.fromarray(mono_target.array).convert('L')
 
 def geo_rgb_to_im_rgb(rgb_target):
@@ -137,7 +144,88 @@ def get_array(input_target):
 
     return output_array, input_is_geoim
 
-def get_auto_clusters(input_target, n_clusters, n_init=10, to_exclude=-999, mode=''):
+def get_clusters_kmeans_y1_y2(y1, y2, n_clusters, n_init=10, random_state=None):
+    """
+    y1, y2 : 1D arrays with the same shape
+    n_clusters : int, number of clusters to create
+    n_init : int
+    """
+    
+    # Transformation de la matrice d'entrée pour qu'elle soit valide vis à vis du k-means
+    input_array = np.array((y1, y2)).T
+
+    # Créée un estimateur KMeans vide
+    estimator = cluster.KMeans(
+        n_clusters=n_clusters, 
+        n_init=n_init,
+        random_state=random_state)
+
+    # Charge les données dans l'estimateur
+    estimator.fit(input_array)
+
+    # Extrait les labels
+    labels = estimator.labels_
+
+    # Extrait les barycentres
+    barycentres = estimator.cluster_centers_
+
+    return labels, barycentres, estimator
+
+def get_clusters_kmeans_from_df(df, y1, y2, n_clusters, n_init=10, random_state=None):
+    """
+    df : pandas dataframe
+    y1, y2 : strings, column names of the dataframe
+    n_clusters : int, number of clusters to create
+    n_init : int
+    """
+
+    sub = df.dropna(subset=[y1, y2])
+
+    # Extract the two columns
+    y1_array = sub[y1].values
+    y2_array = sub[y2].values
+
+    # Get the clusters
+    labels, barycentres, estimator = get_clusters_kmeans_y1_y2(
+        y1_array, 
+        y2_array, 
+        n_clusters=n_clusters, 
+        n_init=n_init,
+        random_state=random_state)
+
+    return labels, barycentres, estimator
+
+def predict_hue_from_y1_y2_from_arrays(y1, y2, model):
+    """
+    Predict the hue (categorical variable) from two quantitative variables y1 and y2 using a trained model.
+    
+    Parameters:
+    y1 (array-like): First quantitative variable.
+    y2 (array-like): Second quantitative variable.
+    model: A trained classification model with a predict method.
+    
+    Returns:
+    predictions (np.ndarray): Predicted hue values.
+    """
+    # Ensure y1 and y2 are numpy arrays
+    y1 = np.array(y1)
+    y2 = np.array(y2)
+    
+    # Reshape y1 and y2 to be 2D arrays with one column
+    if len(y1.shape) == 1:
+        y1 = y1.reshape(-1, 1)
+    if len(y2.shape) == 1:
+        y2 = y2.reshape(-1, 1)
+    
+    # Combine y1 and y2 into a single feature matrix
+    X = np.hstack((y1, y2))
+    
+    # Use the model to predict the hue
+    predictions = model.predict(X)
+    
+    return predictions
+
+def get_auto_clusters_image(input_target, n_clusters, n_init=10, to_exclude=-999, mode=''):
     """
     input_target : 2D array
     n_clusters   : int, number of clusters to create
@@ -405,19 +493,18 @@ def measure_direction_homogeneity(df, column_name='direction'):
     
     return homogeneity
 
-def explore_linear_relation(x=None, y=None, title='linear data visualisation', x_label='factor', y_label='target', figsize=None, get_mad=False, data=None, hue=None, palette_dict=None, hue_order=None, s=1, alpha=None, ax=None, pts_color='black', reg_line_color='red', reg_line_width=1, scores_text_color='black'):
+def explore_linear_relation(x=None, y=None, title='linear data visualisation', x_label='predictor', y_label='dependant', figsize=None, get_mad=False, data=None, hue=None, palette_dict=None, hue_order=None, s=1, alpha=None, ax=None, pts_color='black', reg_line_color='red', reg_line_alpha=1, reg_line_width=1, scores_text_color='black', xbound=None, ybound=None, show_score=True, show_legend=True, mad_lines_color=None, x_units=None, y_units=None, show_reg_line_label=True, visualize_relation=True, reg_line_label_note=''):
 
-    # Data creation
-    if x is None:
-        x = np.array([1, 2, 3, 4, 5, 6])
-    if y is None:
-        y = np.array([0, 3, 2, 5, 4.8, 5.8])
+    """
+    Linear Model between X and Y
+    """
 
+    # Extract x and y values
     if data is not None:
         assert ValueError('x and y must be strings if data is not None')
-        if x_label == 'factor':
+        if x_label == 'predictor':
             x_label = x
-        if y_label == 'target':
+        if y_label == 'dependant':
             y_label = y
         x = data[x].values
         y = data[y].values
@@ -426,24 +513,43 @@ def explore_linear_relation(x=None, y=None, title='linear data visualisation', x
     if len(x.shape) != 2:
         x=x.reshape(-1,1)
 
+    # Linear Regression Model
+    model = LinearRegression().fit(x,y)
+    r_sq = model.score(x, y)
+
+    if not visualize_relation:
+        return model
+
+    """
+    Visualization of the relation between X and Y with the regression line
+    """
+
     # Create the figure
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
 
+    # Define its title
+    ax.set_title(title)
+
     if data is None:
         sns.scatterplot(x=x.flatten(),y=y, ax=ax, color=pts_color, s=s)
     else:
-        sns.scatterplot(data=data, x=x_label, y=y_label,ax=ax, color=pts_color, palette=palette_dict, s=s, hue=hue, hue_order=hue_order, alpha=alpha)
-
-    ax.set_title(title)
-
-    # Linear Regression
-    model = LinearRegression().fit(x,y)
-    r_sq = model.score(x, y)
+        sns.scatterplot(data=data, x=x_label, y=y_label, ax=ax, color=pts_color, palette=palette_dict, s=s, hue=hue, hue_order=hue_order, alpha=alpha, legend=show_legend)
 
     # Show a new figure with the regression line
     y_predicteds = model.predict(x)
-    sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width)
+    if x_units is None:
+        x_units = x_label
+    if y_units is None:
+        y_units = y_label
+
+    # Show reg line equation as label
+    if show_reg_line_label:
+        reg_line_label = f"{reg_line_label_note}{float(model.intercept_):.2f}{y_units} + {float(model.coef_[0]):.10f}*{x_units}"
+        sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width, alpha=reg_line_alpha, label=reg_line_label)
+    else:
+        sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width, alpha=reg_line_alpha)
+
 
     # Add the differences between reg line and the real values
     xs = x.flatten()
@@ -451,6 +557,9 @@ def explore_linear_relation(x=None, y=None, title='linear data visualisation', x
     y_pred = y_predicteds
     foo = 0
     if get_mad :
+        if mad_lines_color is None:
+            mad_lines_color = reg_line_color
+
         for i, x_val in enumerate(xs):
             xs_pos = [x_val, x_val]
             ys_pos = [y_true[i], y_pred[i]]
@@ -460,18 +569,18 @@ def explore_linear_relation(x=None, y=None, title='linear data visualisation', x
 
             # On trace les petites lignes
             # TODO : pourquoi elles sont petites ? Linewidth ne change rien. 
-            sns.lineplot(x=xs_pos, y=ys_pos, color=reg_line_color, ax=ax)
+            sns.lineplot(x=xs_pos, y=ys_pos, color=mad_lines_color, ax=ax)
 
         # Complète le calcul du MAD ou Mean Absolute Deviation
         mad = foo / len(x)
         print(f"MAD : {mad}")
 
-
     # First evaluation of the correlation between X and Y
     r2_val = r2_score(y_true=y_true, y_pred=y_pred)
     spearman_val, spearman_p = stats.spearmanr(x, y)
-    try:
-        textstr = f"r2: {r2_val.round(2)}\nspearman xy: {spearman_val.round(2)} (p={spearman_p.round(2)})"
+
+    if show_score:
+        textstr = f"r2: {round(r2_val, 2)}"
 
         # Dynamically set position to bottom right using axis bounds
         xlim = ax.get_xlim()
@@ -481,12 +590,319 @@ def explore_linear_relation(x=None, y=None, title='linear data visualisation', x
         ax.text(x_pos, y_pos, textstr, fontsize=10,
                 verticalalignment='bottom', horizontalalignment='right', color=scores_text_color,
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
-    except AttributeError:
-        pass 
-
 
     # Add titles and legends
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+
+    # Set bounds
+    if ybound is not None:
+        ax.set_ybound(ybound)
+    if xbound is not None:
+        ax.set_xbound(xbound)
+
+    return ax, model
+
+def get_anova(df, hue, y, equal_var=True, nan_policy='raise'):
+    """
+    Perform one-way ANOVA on the given DataFrame `df`, grouping by `hue` and testing the means of `y`.
+    """
+    samples = [df[df[hue]==v][y].values for v in df[hue].unique()]
+    samples = [s for s in samples if len(s) > 1]
+    f, p = stats.f_oneway(*samples, equal_var=equal_var, nan_policy=nan_policy)
+    return f, p, p < 0.05
+
+def get_tukey(df, hue, y, v_order=None, ax=None):
+    """
+    Perform Tukey's HSD test on the given DataFrame `df`, grouping by `hue` and testing the means of `y`.
+    """
+    # Get the samples
+    if v_order is None:
+        v_order = df[hue].unique() # We need to know the order of the values
+
+    all_samples = [df[df[hue]==v][y].values for v in v_order]
+    valid_samples = [s for s in all_samples if len(s) > 1]
+    wrong_samples = [s for s in all_samples if len(s) <= 1]
+    valid_v_order = [v for i, v in enumerate(v_order) if len(all_samples[i]) > 1]
+
+    # Perfor the Tukey HSD test
+    res = stats.tukey_hsd(*valid_samples)
+
+    # Visualise the results
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    # Binary mask : True (1) or False (0) for each pair of groups
+    # True, 1 will be shown in green because higher than 0 on the cmap
+    # False, 0, will be shown in red
+    cmap = 'RdYlGn' 
+    mask = res.pvalue <= 0.05
+
+    # Set extent so grid matches cell edges
+    ax.imshow(mask, cmap=cmap)
+
+    # Add a lagend
+    # Create a custom legend for the colors
+    legend_elements = [
+        Patch(facecolor='red', edgecolor='black', label='Not significantly different'),
+        Patch(facecolor='green', edgecolor='black', label='Significantly different')
+    ]
+    ax.legend(handles=legend_elements, loc='upper right', frameon=True, framealpha=0.9, facecolor='white')
+
+    print(wrong_samples)
+
+    # Set ticks and labels
+    ax.set_xticks(range(len(valid_v_order)))
+    ax.set_xticklabels(valid_v_order)
+    ax.set_yticks(range(len(valid_v_order)))
+    ax.set_yticklabels(valid_v_order)
+    return res.statistic, res.pvalue, res.confidence_interval, ax
+
+def show_confusion_matrix(Y_test, Y_test_pred, class_names, ax=None):
+
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    # Get and reshape confusion matrix data
+    matrix = confusion_matrix(Y_test, Y_test_pred)
+    matrix = matrix.astype('float') / matrix.sum(axis=1)[:, np.newaxis]
+
+    # Build the plot
+    sns.heatmap(matrix, annot=True, annot_kws={'size':10}, cmap='mako', linewidths=0.2, ax=ax)
+
+    tick_marks = np.arange(len(class_names)) + 0.5
+    ax.set_xticks(tick_marks, class_names, rotation=25)
+    ax.set_yticks(tick_marks, class_names, rotation=0)
+    ax.set_xlabel('Predicted label')
+    ax.set_ylabel('True label')
+    return ax
+
+
+def show_density_contours(
+    x_col,
+    y_col,
+    data,
+    figsize=None,
+    linewidth=1,
+    alpha=1,
+    levels=[0.25, 0.5, 0.75, 1],
+    fill=True,
+    ax=None,
+    color=None,
+    cmap='Reds',
+    **kwargs
+    ):
+    """
+    Show density contours of two variables x and y, optionally grouped by a hue variable.
+    If only one level is given, use the exact color (not a colormap) for the contour.
+    """ 
+
+    if type(levels) == int or type(levels) == float:
+        levels = [levels]
+
+    # Extract x and y
+    x = data[x_col].values
+    y = data[y_col].values
+
+    # Pre-process
+    if len(x.shape) != 2:
+        x = x.reshape(-1, 1)
+    if len(y.shape) != 2:
+        y = y.reshape(-1, 1)
+
+    # Create the figure
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+
+    # If only one level, set color directly (not cmap)
+    if color is not None:
+        sns.kdeplot(
+            x=x.flatten(),
+            y=y.flatten(),
+            ax=ax,
+            linewidth=linewidth,
+            alpha=alpha,
+            fill=fill,
+            levels=levels,
+            color=color,
+            **kwargs
+        )
+    else:
+        sns.kdeplot(
+            x=x.flatten(),
+            y=y.flatten(),
+            ax=ax,
+            linewidth=linewidth,
+            alpha=alpha,
+            fill=fill,
+            levels=levels,
+            cmap=cmap,
+            **kwargs
+        )
+
+    return ax
+
+def get_w(
+    dem,
+    dir_ins,
+    e_w = 4,
+    s_w = 1,
+):
+    """
+    Compute an index (arbitrarily called "W) based on rasters of 2 drivers : direct insolation and altitude. 
+            
+    params:
+        dem : Geoim, the digital elevation model
+        dir_ins : Geoim, the direct insolation raster
+        e_w : float, the weight of the elevation driver
+        s_w : float, the weight of the direct insolation driver
+        save_w : bool, whether to save the resulting raster
+        out_path : str, the path to save the resulting directory where the raster will be saved
+        out_path_note : str, a note to add to the name of the resulting raster
+
+    return:
+        w : Geoim, the resulting W index raster
+
+    The W index is computed as follows:
+    - Normalize the elevation and direct insolation rasters between 0 and 1 across the study area
+    - Reverse the elevation values because higher elevation = lower temperature
+    - Compute the W index as a weighted sum of the normalized elevation and direct insolation rasters
+    - Normalize the W index between 0 and 1
+    - Invert the W index so that high values correspond to cold ground (low direct insolation and high elevation)
+
+    Note: This index is purely relative and has no physical meaning. It is only meant to be used as a relative index to compare different areas within the same study area.    
+    """
+
+    # Get the arrays from the geoims
+    e = dem.array
+    s = dir_ins.array
+
+    # Normalize values between 0 and 1 across our study area
+    e_norm = normalize_array(e)
+    s_norm = normalize_array(s)
+
+    # Reverse elevation because higher elevation = lower temperature
+    e_norm_inv = 1-e_norm
+
+    # Compute W index
+    w = (e_norm_inv * e_w) + (s_norm * s_w)
+
+    # Normalize it
+    w_norm = normalize_array(w)
+
+    # Invert it so that high value = cold ground
+    w_norm_inv = 1-w_norm
+
+    # Geometrize it
+    w = dir_ins.copy()
+    w.array = w_norm_inv
+
+    return w
+
+def normalize_array(x):
+    return (x - x.min()) / (x.max() - x.min())
+
+def get_y_from_x_on_linear_regmodel(linear_regression_model):
+    print(f"{linear_regression_model.coef_[0]}x + {linear_regression_model.intercept_}")
+    return lambda x: linear_regression_model.intercept_ + linear_regression_model.coef_[0] * x
+
+def cluster_df_on_quantiles(target_df, target_field, n_clusters=4, labels=None, out_field=None):
+    """
+    Automatically cluster a dataframe based on the values of it's rows of a given field
+    """
+
+    # Get the relative quantiles given the desired number of clusters
+    rel_qs = np.linspace(0, 1, n_clusters+1)
+
+    # Get the corresponding bounds in the data serie
+    abs_qs = target_df[target_field].quantile(rel_qs)
+
+    # Define the labels
+    if labels is None:
+        labels =list(string.ascii_letters.upper())
+    labels = labels[:n_clusters]
+
+    # Define the clusters field name
+    if out_field is None:
+        out_field = 'cluster'
+
+    # Establish the clustering based on the values of each rows and the absolute bounds
+    # Each label correspond to the features with a value lower than the bound and higher than the previous bound
+    target_df[out_field] = pd.cut(target_df[target_field], abs_qs, include_lowest=True, labels=labels)
+
+    return target_df
+
+def assign_color_from_clusters(target_df, cluster_field, cmap='tab20'):
+
+    # Get the total number of clusters
+    n_clusters = len(target_df[cluster_field].unique())
+
+    # For each cluster label
+    for i, cluster_label in enumerate(target_df[cluster_field].unique()):
+
+        # Get the color from the colormap
+        color = plt.get_cmap(cmap)(i / n_clusters)
+
+        # Converti  the color to hexadecimal
+        hex_color = '#%02x%02x%02x' % (int(color[0]*255), int(color[1]*255), int(color[2]*255))
+
+        # Assign the hexadecimal colorcode to the rows belonging to the cluster
+        target_df.loc[target_df[cluster_field] == cluster_label, f'{cluster_field}_color'] = hex_color
+
+    return target_df
+
+
+def add_groups_legend(ax, target_df, column, show_counts=True, legend_fontsize=8, legend_loc='upper right', show_bounds=None, bounds_field=None, rounder=2, labels_order=None):
+    """
+    Adds a legend to the map for the_groupss defined in the target_df.
+
+    Parameters:
+    - ax: Matplotlib axis object where the legend will be added.
+    - target_df: GeoDataFrame containing the_groups ed data with colors.
+    - column: The field in target_df that contains the_groups labels.
+    - show_counts: Boolean indicating whether to show counts in the legend.
+    - legend_fontsize: Font size for the legend text.
+    - legend_loc: Location of the legend on the map.
+    - show_bounds : 'mean', 'min_max'
+    - bounds_field = name of the field to get the stats for each categoriy / bound
+
+    Returns:
+    - ax: Matplotlib axis object with the added legend.
+    """
+
+    # Define the dict of match between labels and colors
+    category_colors_match = {}
+    if labels_order is None:
+        for label in target_df[column].unique():
+            color = target_df[target_df[column] == label][f'{column}_color'].values[0]
+            category_colors_match[label] = color
+        
+    else:
+        for label in labels_order:
+            color = target_df[target_df[column] == label][f'{column}_color'].values[0]
+            category_colors_match[label] = color
+
+    # Define the patches elements - First case : only the feature counts of each category
+    if show_counts == True and show_bounds is None:
+        legend_elements = [Patch(facecolor=color, label=f"{label} ({len(target_df[target_df[column] == label])})") for label, color in category_colors_match.items()]
+
+    elif show_counts == True and show_bounds == 'min_max':
+        legend_elements = [Patch(facecolor=color, label=f"{label} : {np.round(target_df[target_df[column] == label][bounds_field].min(), rounder)} ; {np.round(target_df[target_df[column] == label][bounds_field].max(), rounder)} ({len(target_df[target_df[column] == label])})")  for label, color in category_colors_match.items()]
+
+    elif show_counts == True and show_bounds == 'mean':
+        legend_elements = [Patch(facecolor=color, label=f"{label} : {np.round(target_df[target_df[column] == label][bounds_field].mean(), rounder)} ({len(target_df[target_df[column] == label])})")  for label, color in category_colors_match.items()]
+
+    elif show_counts == False and show_bounds == 'min_max':
+        legend_elements = [Patch(facecolor=color, label=f"{label} : {np.round(target_df[target_df[column] == label][bounds_field].min(), rounder)} ; {np.round(target_df[target_df[column] == label][bounds_field].max(), rounder)}")  for label, color in category_colors_match.items()]
+
+    elif show_counts == False and show_bounds == 'mean':
+        legend_elements = [Patch(facecolor=color, label=f"{label} : {np.round(target_df[target_df[column] == label][bounds_field].mean(), rounder)} ; {np.round(target_df[target_df[column] == label][bounds_field].max(), rounder)}")  for label, color in category_colors_match.items()]
+    
+    # Case : nothing to display as label
+    else:
+        legend_elements = [Patch(facecolor=color, label=f"{label}") for label, color in category_colors_match.items()]
+
+    # Implement the legend
+    ax.legend(handles=legend_elements, title='', fontsize=legend_fontsize, loc=legend_loc).set_zorder(100)
 
     return ax

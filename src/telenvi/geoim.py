@@ -1,3 +1,4 @@
+#%%
 module_description = """
 --- telenvi.Geoim ---
 Use Geoim objects to read only once a raster file array.
@@ -747,6 +748,18 @@ array type : {self.array.dtype}""")
         values = list(filter(lambda v: v != -999, values))
         return values
 
+    def _inspectGeoPolygon2(self, geoPolygon, epsg=2056):
+        """
+        extract pixels values contained in the geoPolygon
+        Spoiler : this method is very long to compute
+        """
+        self.maskFromVector(geoPolygon, epsg=epsg, inside=True)
+        ar_min = ma.min(self.array)
+        ar_med = ma.median(self.array)
+        ar_max = ma.max(self.array)
+        self.unmask()
+        return ar_min, ar_med, ar_max
+
     def inspectGeoPolygon(self, geoPolygon):
         """
         extract pixels values contained in the geoPolygon
@@ -781,10 +794,10 @@ array type : {self.array.dtype}""")
         """
         return rt.getCardinalArrayFromAspect(self)
 
-    def vectorize(self):
-        return rt.vectorize(self.ds)
+    def vectorize(self, mode='polygons'):
+        return rt.vectorize(self.ds, mode=mode)
 
-    def show_on_map(self, epsg=2056, alpha=1, cmap=None, vmin=None, vmax=None, ax=None, figsize=(5,5), bar=True, buffer=0):
+    def show_on_map(self, epsg=2056, alpha=1, cmap=None, vmin=None, vmax=None, ax=None, figsize=(5,5), bar=True, bar_fraction=0.9, bar_pad=0.05, bar_ticks_pos='left', bar_orientation='vertical', bar_ticks_fontsize=8, bar_ticks_fontcolor='black', bar_label=None, bar_label_fontsize=8, bar_label_position='bottom', bar_label_fontcolor='black', buffer=0):
         """
         Show the raster but in a plot with georeferenced axis, not with the number of pixels
         """
@@ -816,7 +829,15 @@ array type : {self.array.dtype}""")
 
         # Show the legend bar
         if bar:
-            plt.colorbar(ax.images[-1], ax=ax)
+
+            # Adjust the position of the colorbar
+            im = ax.images[-1]
+            cbar = plt.colorbar(im, ax=ax, fraction=bar_fraction, pad=bar_pad, orientation=bar_orientation)
+            cbar.ax.tick_params(labelsize=bar_ticks_fontsize, color=bar_ticks_fontcolor)
+            cbar.ax.yaxis.set_ticks_position(bar_ticks_pos)
+
+            if bar_label is not None:
+                cbar.set_label(bar_label, fontsize=bar_label_fontsize, loc=bar_label_position, color=bar_label_fontcolor)
 
         # Send the axis
         return ax
@@ -828,4 +849,18 @@ array type : {self.array.dtype}""")
         """
         med_value_in_georow = np.median(np.array(self.inspectGeoPolygon(georow.geometry)))
         return med_value_in_georow
+    
+    def get_surf_in_raster_range(self, aoi, b_inf, b_sup, epsg=2056, show=False, vectorize_result=False, kernel_size=None):
+        """
+        Return the surface in meters of the AOI where the raster array is between binf and bsup 
+        aoi : geodataframe
+        target : string, gdal dataset or geoim
+        binf, bsup : int
+        """
+        return rt.get_surf_in_raster_range(self, aoi, b_inf, b_sup, epsg=epsg, show=show, vectorize_result=vectorize_result, kernel_size=kernel_size)
 
+    def apply_blur(self, r=5):
+        """
+        Apply gaussian filter on the raster
+        """
+        return rt.apply_blur(self, r)

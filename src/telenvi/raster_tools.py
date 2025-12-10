@@ -9,6 +9,7 @@ syntax.
 from telenvi.associations import npdtype_gdalconst, extensions_drivers
 import telenvi.geoim as geoim
 import telenvi.vector_tools as vt 
+import telenvi.aida as aida
 
 # Standard libraries
 import numbers
@@ -24,6 +25,7 @@ from tqdm import tqdm
 
 # Data libraries
 import numpy as np
+from numpy import ma
 import pandas as pd
 
 # Dataviz libraries
@@ -31,12 +33,15 @@ from matplotlib import pyplot as plt
 
 # Geo libraries
 import shapely
+import geopandas as gpd
+
 import rasterio
 from rasterio.features import shapes
-from shapely.errors import ShapelyDeprecationWarning
-import richdem as rd
-import geopandas as gpd
 from osgeo import gdal, gdalconst, osr, ogr
+from shapely.errors import ShapelyDeprecationWarning
+import tempfile
+
+VERBOSE=True
 
 """
 # --------------
@@ -44,11 +49,20 @@ from osgeo import gdal, gdalconst, osr, ogr
 # --------------
 """
 
-    
 def getDs(target, mode=''):
 
     if mode == 'rasterio':
-        return rasterio.open(target)
+        if isinstance(target, str):
+            return rasterio.open(target, 'r')
+        elif isinstance(target, gdal.Dataset):
+            # Save GDAL dataset to a temporary file and open with rasterio
+            temp = tempfile.NamedTemporaryFile(suffix='.tif', delete=False)
+            driver = gdal.GetDriverByName('GTiff')
+            driver.CreateCopy(temp.name, target)
+            temp.close()
+            return rasterio.open(temp.name, 'r')
+        else:
+            raise ValueError("Unsupported target type for rasterio mode.")
 
     if type(target) == str:
         if not os.path.exists(target):
@@ -701,7 +715,8 @@ def create(
     try:
         ds_enc = npdtype_gdalconst[array.dtype.name]
     except KeyError:
-        print("@TELENVI INFOS : WARNING : \nno gdalconst encoding found for this array - default assignation : gdalconst.GDT_Float64 - the heaviest")
+        if VERBOSE:
+            print("@TELENVI INFOS : WARNING : \nno gdalconst encoding found for this array - default assignation : gdalconst.GDT_Float64 - the heaviest")
         ds_enc = gdalconst.GDT_Float64
 
     # Get raster size from the array
@@ -759,12 +774,43 @@ def write(target, outpath, ndValue=None, verbose=True):
             print(f"error during {os.path.basename(outpath)} creation")
         return False    
     
-def vectorize(target, mode='points'):
+def vectorize(target, mode='polygons', epsg=2056):
+    """
+    Vectorize a raster into polygons or points
+    - PARAMETERS -
+    target : str - a path to a raster file
+             osgeo.gdal.Dataset - a raster file represented by a gdal.Dataset
+             geoim.Geoim - a raster file represented by a geoim.Geoim
+    """
 
-    # Read the target
-    target = geoim.Geoim(target)
+    # Extract gdal dataset
+    target = Open(target)
 
-    if mode == 'points':
+    # Vectorize
+    if mode == 'polygons':    
+
+        # Convert target as rasterio    
+        target = getDs(target, mode='rasterio')
+
+        # Array extraction
+        image = target.read(1)
+
+        # Rasterio magic tricks
+        results = ({'properties': {'raster_val': v}, 'geometry': s} for i, (s, v) in enumerate(shapes(image, transform=target.transform)))
+
+        # Geometries extraction
+        geoms = list(results)
+
+        # Build a GeoDataFrame
+        vectorLayer = gpd.GeoDataFrame.from_features(geoms).set_crs(epsg=epsg)
+
+        # Dissolve polygons with same value
+        vectorLayer = vectorLayer.dissolve(by='raster_val').reset_index()
+
+    elif mode == 'points':
+
+        # Convert target as Geoim
+        target = geoim.Geoim(target)
 
         # extract raster metadata
         x_origin, y_origin = getOrigin(target)
@@ -818,24 +864,9 @@ def vectorize(target, mode='points'):
 
         # Concat all the row DataFrames into one
         vectorLayer = gpd.GeoDataFrame(pd.concat(protoVectorLayer, ignore_index=True))
+        vectorLayer.set_crs(epsg=epsg, inplace=True)
 
     return vectorLayer
-
-    """
-    elif mode == 'polygons':
-        
-        target = getRasterioDs(target)
-        with rasterio.Env():
-            with rasterio.open(str(Path(self.session.p_raster_data, self.pz_name, 'displacements', f"{self.pz_name}_moving-areas_{n_clusters}_{mode}.tif"))) as src:
-                image = src.read(1) # first band
-                results = (
-                {'properties': {'raster_val': v}, 'geometry': s}
-                for i, (s, v) 
-                in enumerate(
-                    shapes(image, mask=mask, transform=src.transform)))
-        geoms = list(results)
-        gpd_polygonized_raster = gpd.GeoDataFrame.from_features(geoms).set_crs(epsg=2154)
-        """
 
 def cropFromIndexes(target, indexes):
 
@@ -918,6 +949,9 @@ def Open(
     if verbose: 
         print("\n")
     
+    if type(target) == geoim.Geoim:
+        return target
+
     # Get target
     inDs = getDs(target)
 
@@ -1029,7 +1063,6 @@ def getCurvature(dem):
 
     return curv
 
-
 def preProcessDem(dem):
     """Pre process a dem array before sending it to Richdem"""
 
@@ -1117,7 +1150,7 @@ def getCardinalArrayFromAspect(aspect):
     else:
         return cardi_array
 
-def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt']):
+def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt'], paths_to_avoid=[], account_for_subdirs = True):
     """
     Map the extents of the rasters contained in a directory
     """
@@ -1128,13 +1161,21 @@ def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt']):
     targets_paths = []
     for xt in extensions:
         xt = xt.removeprefix('.')
-        targets_paths += list(target_dir_path.glob(f'**/*.{xt}'))
+        if account_for_subdirs:
+            targets_paths += list(target_dir_path.glob(f'**/*.{xt}'))
+        else:
+            targets_paths += list(target_dir_path.glob(f'*.{xt}'))
+
+    # Filter out them which are in the paths to avoid
+    if len(paths_to_avoid) > 0:
+        targets_paths = list(filter(lambda row: str(row) not in paths_to_avoid, targets_paths))
 
     # Write their filepaths in a geodataframe
     geo_extents = pd.DataFrame([{'filepath':str(path)} for path in targets_paths])
-    geo_extents['geometry'] = ''
+    print(len(geo_extents))
 
     # Map their extents
+    geo_extents['geometry'] = ''
     geo_extents['geometry'] = geo_extents.apply(lambda row: drawGeomExtent(row.filepath, 'shly'), axis=1)
 
     # Convert into GeoDataFrame
@@ -1241,6 +1282,95 @@ def show_pannel(arrays, titles=[], cmap='Greys_r', figsize=(16,4), vmin=None, vm
 
     return fig
     
+def get_surf_in_raster_range(target, aoi, b_inf, b_sup, epsg=2056, show=False, vectorize_result=False, kernel_size=None):
+    """
+    Return the surface in meters of the AOI where the raster array is between binf and bsup 
+    aoi : geodataframe
+    target : string, gdal dataset or geoim
+    binf, bsup : int
+    kernel_size : int - if vectorize_result is True, apply a Gaussian blur of this size before vectorization
+    """
+
+    # Open target raster
+    if type(target) != geoim.Geoim:
+        target = Open(target, load_pixels=True)
+
+    # Mask it
+    target.unmask()
+    target.maskFromVector(aoi, epsg)
+
+    # Extract array
+    target_ar = target.array
+
+    # Apply binary mask
+    binary_target_ar = ma.where(1, (target_ar >= b_inf) & (target_ar < b_sup), 0)
+    if show:
+        plt.imshow(binary_target_ar)
+
+    # Count the pixels and multiply by the surface of 1 pixel
+    np_pixels_in_zone = ma.sum(binary_target_ar)
+    surf_pixel = abs(target.getPixelSize()[0])**2
+
+    # Sum all the binary pixels which are equals to 1 where the condition match
+    surf_in_alti_range = np.sum(np_pixels_in_zone * surf_pixel)
+
+    # Vectorize result in a polygon
+    if vectorize_result:
+
+        # Make a copy of the geosettings
+        binary_geoim = target.copy()
+
+        # Set the new array to the binary geoim
+        binary_geoim.array = binary_target_ar
+
+        # Apply a blur filter on the binary array
+        if kernel_size is not None:
+            binary_geoim = apply_blur(binary_geoim, r=kernel_size)
+
+        result_layer = binary_geoim.vectorize(mode='polygons')
+        result_layer = result_layer[result_layer['raster_val'] == 1]
+        return surf_in_alti_range, result_layer.set_crs(epsg=epsg)
+
+    else:
+        return surf_in_alti_range
+
+def apply_blur(target, r=5):
+    """
+    Apply Gaussian filter from Pillow
+    """
+    if type(target) != geoim.Geoim:
+        target = Open(target, load_pixels=True)
+
+    # Convert to pillow object
+    target_pil = aida.geo_monoband_to_pil(target)
+
+    # Apply filter
+    target_blurred = aida.blur(target_pil, r=r)
+
+    # Get back to geoim
+    target_geo_blurred = aida.mono_im_to_geo_mono(target_blurred, target)
+    return target_geo_blurred    
+
+def clip_a_b(target_a, target_b, nRes=None):
+    """
+    target_a, target_b : geoims
+    Caution : A and B needs to share the same geoextent
+    Resample A and B if asked
+    Crop A and B to arrays to ensure the same array size
+    """
+
+    # Resampling
+    if nRes is not None:
+        target_a = target_a.resize(nRes)
+        target_b = target_b.resize(nRes)
+
+    # Array crops
+    min_shape = np.minimum(target_a.array.shape, target_b.array.shape)
+    target_a.array = target_a.array[:min_shape[0], :min_shape[1]]
+    target_b.array = target_b.array[:min_shape[0], :min_shape[1]]
+
+    return target_a, target_b
+
 #TODO if __name__ == "__main__":
 # 
 #     # There is a lot of work to do here
