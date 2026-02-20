@@ -512,6 +512,7 @@ def explore_linear_relation(
     reg_line_color='red',
     reg_line_alpha=1,
     reg_line_width=1,
+    reg_line_style='solid',
     scores_text_color='black',
     xbound=None,
     ybound=None,
@@ -521,116 +522,162 @@ def explore_linear_relation(
     x_units=None,
     y_units=None,
     show_reg_line_label=True,
-    visualize_relation=True,
+    visualize_relation=False,
     reg_line_label_note=''
 ):
-
     """
-    Linear Model between X and Y
+    Fit a linear model and optionally visualize it with scatter, regression line, MAD lines,
+    and return a dataframe with predicted values (f"pred_{y_label}").
     """
+    # Preprocess data
+    x_vals, y_vals, x_label, y_label, is_multivariate = preprocess_data(x, y, data, x_label, y_label)
 
-    # Extract x and y values
+    # Fit model
+    model = fit_linear_model(x_vals, y_vals)
+
+    # Prepare DataFrame with predictions
     if data is not None:
-        assert ValueError('x and y must be strings if data is not None')
-        if x_label == 'predictor':
-            x_label = x
-        if y_label == 'dependant':
-            y_label = y
-        x = data[x].values
-        y = data[y].values
+        df_out = data.copy()
+    else:
+        df_out = pd.DataFrame({y_label: y_vals})
 
-    # Pre-process
-    if len(x.shape) != 2:
-        x=x.reshape(-1,1)
+    # Compute predicted values
+    y_pred = model.predict(x_vals)
+    pred_col = f"pred_{y_label.lower().replace(' ', '_')}"
+    df_out[pred_col] = y_pred.flatten()
 
-    # Linear Regression Model
-    model = LinearRegression().fit(x,y)
-    r_sq = model.score(x, y)
+    # Visualization
+    if visualize_relation:
+        ax = plot_linear_relation(
+            x_vals, y_vals, model, x_label, y_label, ax=ax, title=title,
+            data=data, hue=hue, palette_dict=palette_dict, hue_order=hue_order,
+            s=s, alpha=alpha, pts_color=pts_color, reg_line_color=reg_line_color,
+            reg_line_alpha=reg_line_alpha, reg_line_width=reg_line_width,
+            reg_line_style=reg_line_style, scores_text_color=scores_text_color,
+            xbound=xbound, ybound=ybound, show_score=show_score, show_legend=show_legend,
+            get_mad=get_mad, mad_lines_color=mad_lines_color,
+            x_units=x_units, y_units=y_units,
+            show_reg_line_label=show_reg_line_label,
+            reg_line_label_note=reg_line_label_note,
+            is_multivariate=is_multivariate
+        )
+        return ax, model, df_out
 
-    if not visualize_relation:
-        return model
+    return model, df_out
 
-    """
-    Visualization of the relation between X and Y with the regression line
-    """
+def preprocess_data(x, y, data, x_label='predictor', y_label='dependant'):
+    is_multivariate = False
+    if data is not None:
+        if isinstance(x, list):
+            x_vals = data[x].values
+            is_multivariate = True
+        else:
+            x_vals = data[x].values.reshape(-1, 1)
+        y_vals = data[y].values
+        if isinstance(x, list):
+            x_label = " + ".join(x) if x_label == 'predictor' else x_label
+        else:
+            x_label = x if x_label == 'predictor' else x_label
+        y_label = y if y_label == 'dependant' else y_label
+    else:
+        x_vals = np.array(x)
+        if len(x_vals.shape) == 1:
+            x_vals = x_vals.reshape(-1, 1)
+        elif len(x_vals.shape) > 1:
+            is_multivariate = True
+        y_vals = np.array(y)
+    return x_vals, y_vals, x_label, y_label, is_multivariate
 
-    # Create the figure
+def fit_linear_model(x, y):
+    model = LinearRegression().fit(x, y)
+    return model
+
+def plot_linear_relation(
+    x, y, model, x_label, y_label, ax=None, title='linear data visualisation',
+    data=None, hue=None, palette_dict=None, hue_order=None, s=1, alpha=None,
+    pts_color='black', reg_line_color='red', reg_line_alpha=1, reg_line_width=1, reg_line_style='solid',
+    scores_text_color='black', xbound=None, ybound=None, show_score=True, show_legend=True,
+    get_mad=False, mad_lines_color=None, x_units=None, y_units=None,
+    show_reg_line_label=True, reg_line_label_note='', is_multivariate=False
+):
+    # Create figure
     if ax is None:
-        fig, ax = plt.subplots(figsize=figsize)
-
-    # Define its title
+        fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_title(title)
 
-    if data is None:
-        sns.scatterplot(x=x.flatten(),y=y, ax=ax, color=pts_color, s=s)
-    else:
-        sns.scatterplot(data=data, x=x_label, y=y_label, ax=ax, color=pts_color, palette=palette_dict, s=s, hue=hue, hue_order=hue_order, alpha=alpha, legend=show_legend)
+    # If multi-predictor: plot pred_y vs actual y
+    if is_multivariate:
+        # Multi-predictor: predicted vs actual
+        y_pred = model.predict(x)
+        # Safe column-like label
+        x_vis_label = f"pred_{y_label.lower().replace(' ', '_')}"
+        y_vis = y
 
-    # Show a new figure with the regression line
-    y_predicteds = model.predict(x)
-    if x_units is None:
-        x_units = x_label
-    if y_units is None:
-        y_units = y_label
+        # Scatter plot using arrays, not DataFrame columns
+        sns.scatterplot(x=y_pred.flatten(), y=y_vis, ax=ax, color=pts_color, s=s, alpha=alpha)
 
-    # Show reg line equation as label
-    if show_reg_line_label:
-        reg_line_label = f"{reg_line_label_note}{float(model.intercept_):.2f}{y_units} + {float(model.coef_[0]):.10f}*{x_units}"
-        sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width, alpha=reg_line_alpha, label=reg_line_label)
-    else:
-        sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width, alpha=reg_line_alpha)
+        # Regression line (y=x)
+        sns.lineplot(x=y_pred.flatten(), y=y_pred.flatten(), ax=ax,
+                    color=reg_line_color, linewidth=reg_line_width, alpha=reg_line_alpha, linestyle=reg_line_style)
 
-    # Add the differences between reg line and the real values
-    xs = x.flatten()
-    y_true = y
-    y_pred = y_predicteds
-    foo = 0
-    if get_mad :
-        if mad_lines_color is None:
-            mad_lines_color = reg_line_color
+        # MAD lines
+        if get_mad:
+            plot_mad_lines(y_pred, y_vis, y_pred, ax, mad_lines_color, reg_line_color)
 
-        for i, x_val in enumerate(xs):
-            xs_pos = [x_val, x_val]
-            ys_pos = [y_true[i], y_pred[i]]
-        
-            # On en profite pour calculer l'Erreur Moyenne Absolue
-            foo = foo + abs(y_pred[i] - y_true[i])
+        # Score text
+        if show_score:
+            add_scores_text(y_pred, y_vis, y_pred, ax, scores_text_color)
 
-            # On trace les petites lignes
-            # TODO : pourquoi elles sont petites ? Linewidth ne change rien. 
-            sns.lineplot(x=xs_pos, y=ys_pos, color=mad_lines_color, ax=ax)
-
-        # Complète le calcul du MAD ou Mean Absolute Deviation
-        mad = foo / len(x)
-        print(f"MAD : {mad}")
-
-    # First evaluation of the correlation between X and Y
-    r2_val = r2_score(y_true=y_true, y_pred=y_pred)
-    spearman_val, spearman_p = stats.spearmanr(x, y)
-
-    if show_score:
-        textstr = f"r2: {round(r2_val, 2)}"
-
-        # Dynamically set position to bottom right using axis bounds
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
-        y_pos = ylim[0] + 0.02 * (ylim[1] - ylim[0])
-        ax.text(x_pos, y_pos, textstr, fontsize=10,
-                verticalalignment='bottom', horizontalalignment='right', color=scores_text_color,
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
-
-    # Add titles and legends
-    ax.set_xlabel(x_label)
+    # Axes labels
+    ax.set_xlabel(x_label if not is_multivariate else "pred_" + y_label)
     ax.set_ylabel(y_label)
 
-    # Set bounds
-    if ybound is not None:
-        ax.set_ybound(ybound)
+    # Bounds
     if xbound is not None:
         ax.set_xbound(xbound)
+    if ybound is not None:
+        ax.set_ybound(ybound)
 
-    return ax, model
+    return ax
+
+def plot_scatter(x, y, data, x_label, y_label, ax, hue, palette_dict, hue_order, s, alpha, pts_color, show_legend):
+    if data is None:
+        sns.scatterplot(x=x.flatten(), y=y, ax=ax, color=pts_color, s=s)
+    else:
+        sns.scatterplot(
+            data=data, x=x_label, y=y_label, ax=ax, color=pts_color, palette=palette_dict,
+            s=s, hue=hue, hue_order=hue_order, alpha=alpha, legend=show_legend
+        )
+
+def plot_regression_line(x, y_pred, model, ax, x_label, y_label,
+                         color='red', width=1, alpha=1, style='solid', show_label=True, label_note='', x_units=None, y_units=None):
+    if model is not None and show_label:
+        if x_units is None: x_units = x_label
+        if y_units is None: y_units = y_label
+        label = f"{label_note}{model.intercept_:.2f}{y_units} + {model.coef_[0]:.10f}*{x_units}"
+    else:
+        label = None
+    sns.lineplot(x=x.flatten(), y=y_pred, ax=ax, color=color, linewidth=width, alpha=alpha, label=label, linestyle=style)
+
+def plot_mad_lines(x, y_true, y_pred, ax, mad_lines_color, default_color):
+    color = mad_lines_color or default_color
+    mad = 0
+    for xi, yt, yp in zip(x.flatten(), y_true, y_pred):
+        sns.lineplot(x=[xi, xi], y=[yt, yp], ax=ax, color=color)
+        mad += abs(yt - yp)
+    mad /= len(x)
+    print(f"MAD: {mad}")
+
+def add_scores_text(x, y_true, y_pred, ax, scores_text_color):
+    r2_val = r2_score(y_true, y_pred)
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
+    y_pos = ylim[0] + 0.02 * (ylim[1] - ylim[0])
+    ax.text(x_pos, y_pos, f"r2: {round(r2_val, 2)}",
+        fontsize=10, verticalalignment='bottom',
+        horizontalalignment='right', color=scores_text_color,
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+
 
 def get_anova(df, hue, y, equal_var=True, nan_policy='raise'):
     """
