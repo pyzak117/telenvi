@@ -41,6 +41,8 @@ from osgeo import gdal, gdalconst, osr, ogr
 from shapely.errors import ShapelyDeprecationWarning
 import tempfile
 
+import richdem as rd
+
 VERBOSE=True
 
 """
@@ -1092,6 +1094,27 @@ def getSlope(dem):
     slope = geoim.Geoim(dem.ds, slope_deg)
 
     return slope
+
+def getHillshade(dem, azimuth=315, altitude=45):
+    """
+    Compute hillshade from a dem 
+    """
+
+    # Create hillshade with gdal
+    hillshade_array = gdal.DEMProcessing(
+        '',
+        dem,
+        'hillshade',
+        computeEdges=True,
+        azimuth=azimuth,
+        altitude=altitude,
+        format='MEM'
+    ).ReadAsArray()
+
+    # Create a geoim with this array and the same dataset than the initial dem
+    hillshade = geoim.Geoim(dem, hillshade_array)
+
+    return hillshade
 
 def getAspect(dem):
     """

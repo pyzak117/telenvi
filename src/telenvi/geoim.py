@@ -512,7 +512,7 @@ array type : {self.array.dtype}""")
 
             return bands
 
-    def show(self, band=0, cmap="viridis", bar=True, vmin=None, vmax=None, ax=None, figsize=None):
+    def show(self, band=0, cmap="viridis", bar=True, vmin=None, vmax=None, ax=None, figsize=None, origin='upper'):
 
         """
         :descr:
@@ -540,19 +540,19 @@ array type : {self.array.dtype}""")
 
         # Plot
         if nBands > 1:
-            ax.imshow(self.array[band], cmap=cmap)
+            ax.imshow(self.array[band], cmap=cmap, origin=origin)
 
             if vmin is not None and vmax is not None:
-                ax.imshow(self.array[band], cmap=cmap, vmin=vmin, vmax=vmax)
+                ax.imshow(self.array[band], cmap=cmap, vmin=vmin, vmax=vmax, origin=origin)
 
         else:
-            ax.imshow(self.array, cmap=cmap)
+            ax.imshow(self.array, cmap=cmap, origin=origin)
             if vmin is not None and vmax is not None:
-                ax.imshow(self.array, cmap=cmap, vmin=vmin, vmax=vmax)
+                ax.imshow(self.array, cmap=cmap, vmin=vmin, vmax=vmax, origin=origin)
 
         if bar:
             plt.colorbar(ax.images[-1], ax=ax)
-        # plt.show()
+
         return ax
 
     def save(self, outpath, mask = False, verbose=True):
@@ -797,7 +797,7 @@ array type : {self.array.dtype}""")
     def vectorize(self, mode='polygons'):
         return rt.vectorize(self.ds, mode=mode)
 
-    def show_on_map(self, epsg=2056, alpha=1, cmap=None, vmin=None, vmax=None, ax=None, figsize=(5,5), bar=True, bar_fraction=0.9, bar_pad=0.05, bar_ticks_pos='left', bar_orientation='vertical', bar_ticks_fontsize=8, bar_ticks_fontcolor='black', bar_label=None, bar_label_fontsize=8, bar_label_position='bottom', bar_label_fontcolor='black', buffer=0):
+    def show_on_map(self, epsg=2056, alpha=1, cmap=None, vmin=None, vmax=None, ax=None, figsize=(5,5), bar=True, bar_fraction=0.9, bar_pad=0.05, bar_ticks_pos='left', bar_orientation='vertical', bar_ticks_fontsize=8, bar_ticks_fontcolor='black', bar_label=None, bar_label_fontsize=8, bar_label_position='bottom', bar_label_fontcolor='black', buffer=0, origin='upper'):
         """
         Show the raster but in a plot with georeferenced axis, not with the number of pixels
         """
@@ -825,7 +825,7 @@ array type : {self.array.dtype}""")
             ar_to_show = self.array
 
         # Show the image on the axis
-        ax.imshow(ar_to_show, cmap=cmap, vmin=vmin, vmax=vmax, extent=geobounds, alpha=alpha)
+        ax.imshow(ar_to_show, cmap=cmap, vmin=vmin, vmax=vmax, extent=geobounds, alpha=alpha, origin=origin)
 
         # Show the legend bar
         if bar:

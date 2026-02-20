@@ -493,7 +493,37 @@ def measure_direction_homogeneity(df, column_name='direction'):
     
     return homogeneity
 
-def explore_linear_relation(x=None, y=None, title='linear data visualisation', x_label='predictor', y_label='dependant', figsize=None, get_mad=False, data=None, hue=None, palette_dict=None, hue_order=None, s=1, alpha=None, ax=None, pts_color='black', reg_line_color='red', reg_line_alpha=1, reg_line_width=1, scores_text_color='black', xbound=None, ybound=None, show_score=True, show_legend=True, mad_lines_color=None, x_units=None, y_units=None, show_reg_line_label=True, visualize_relation=True, reg_line_label_note=''):
+def explore_linear_relation(
+    x=None,
+    y=None,
+    title='linear data visualisation',
+    x_label='predictor',
+    y_label='dependant',
+    figsize=None,
+    get_mad=False,
+    data=None,
+    hue=None,
+    palette_dict=None,
+    hue_order=None,
+    s=1,
+    alpha=None,
+    ax=None,
+    pts_color='black',
+    reg_line_color='red',
+    reg_line_alpha=1,
+    reg_line_width=1,
+    scores_text_color='black',
+    xbound=None,
+    ybound=None,
+    show_score=True,
+    show_legend=True,
+    mad_lines_color=None,
+    x_units=None,
+    y_units=None,
+    show_reg_line_label=True,
+    visualize_relation=True,
+    reg_line_label_note=''
+):
 
     """
     Linear Model between X and Y
@@ -549,7 +579,6 @@ def explore_linear_relation(x=None, y=None, title='linear data visualisation', x
         sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width, alpha=reg_line_alpha, label=reg_line_label)
     else:
         sns.lineplot(x=x.flatten(), y=y_predicteds, color=reg_line_color, ax=ax, linewidth=reg_line_width, alpha=reg_line_alpha)
-
 
     # Add the differences between reg line and the real values
     xs = x.flatten()
@@ -676,7 +705,6 @@ def show_confusion_matrix(Y_test, Y_test_pred, class_names, ax=None):
     ax.set_xlabel('Predicted label')
     ax.set_ylabel('True label')
     return ax
-
 
 def show_density_contours(
     x_col,
