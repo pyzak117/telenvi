@@ -493,6 +493,10 @@ def measure_direction_homogeneity(df, column_name='direction'):
     
     return homogeneity
 
+# =====================================================
+# Main function
+# =====================================================
+
 def explore_linear_relation(
     x=None,
     y=None,
@@ -522,161 +526,212 @@ def explore_linear_relation(
     x_units=None,
     y_units=None,
     show_reg_line_label=True,
-    visualize_relation=False,
-    reg_line_label_note=''
+    visualize_relation=True,
+    reg_line_label_note='',
+    pts_label_field=None
 ):
-    """
-    Fit a linear model and optionally visualize it with scatter, regression line, MAD lines,
-    and return a dataframe with predicted values (f"pred_{y_label}").
-    """
-    # Preprocess data
-    x_vals, y_vals, x_label, y_label, is_multivariate = preprocess_data(x, y, data, x_label, y_label)
 
+    # -----------------------------
+    # Preprocess
+    # -----------------------------
+    X, y_true, x_label, y_label, is_multivariate, df_out = preprocess_data(
+        x, y, data, x_label, y_label
+    )
+
+    # -----------------------------
     # Fit model
-    model = fit_linear_model(x_vals, y_vals)
+    # -----------------------------
+    model = LinearRegression().fit(X, y_true)
+    y_pred = model.predict(X)
 
-    # Prepare DataFrame with predictions
-    if data is not None:
-        df_out = data.copy()
-    else:
-        df_out = pd.DataFrame({y_label: y_vals})
-
-    # Compute predicted values
-    y_pred = model.predict(x_vals)
+    # -----------------------------
+    # Output dataframe
+    # -----------------------------
     pred_col = f"pred_{y_label.lower().replace(' ', '_')}"
-    df_out[pred_col] = y_pred.flatten()
+    df_out[pred_col] = y_pred
 
+    # -----------------------------
     # Visualization
+    # -----------------------------
     if visualize_relation:
-        ax = plot_linear_relation(
-            x_vals, y_vals, model, x_label, y_label, ax=ax, title=title,
-            data=data, hue=hue, palette_dict=palette_dict, hue_order=hue_order,
-            s=s, alpha=alpha, pts_color=pts_color, reg_line_color=reg_line_color,
-            reg_line_alpha=reg_line_alpha, reg_line_width=reg_line_width,
-            reg_line_style=reg_line_style, scores_text_color=scores_text_color,
-            xbound=xbound, ybound=ybound, show_score=show_score, show_legend=show_legend,
-            get_mad=get_mad, mad_lines_color=mad_lines_color,
-            x_units=x_units, y_units=y_units,
-            show_reg_line_label=show_reg_line_label,
-            reg_line_label_note=reg_line_label_note,
-            is_multivariate=is_multivariate
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize)
+
+        ax.set_title(title)
+
+        if is_multivariate:
+            x_vis = y_pred
+            y_vis = y_true
+            x_vis_label = pred_col
+            y_vis_label = y_label
+        else:
+            x_vis = X.flatten()
+            y_vis = y_true
+            x_vis_label = x_label
+            y_vis_label = y_label
+
+        # Scatter
+        plot_scatter(
+            x_vis, y_vis, ax,
+            hue=hue, palette_dict=palette_dict,
+            s=s, alpha=alpha, pts_color=pts_color,
+            show_legend=show_legend, data=df_out
         )
+
+        # Regression line
+        plot_regression_line(
+            x_vis, y_pred if not is_multivariate else x_vis,
+            model if not is_multivariate else None,
+            ax, x_vis_label, y_vis_label,
+            reg_line_color, reg_line_width,
+            reg_line_alpha, reg_line_style,
+            show_reg_line_label, reg_line_label_note,
+            x_units, y_units
+        )
+
+        # MAD lines
+        if get_mad:
+            plot_mad_lines(x_vis, y_vis, y_pred if not is_multivariate else x_vis,
+                           ax, mad_lines_color, reg_line_color)
+
+        # Score
+        if show_score:
+            add_scores_text(x_vis, y_vis, y_pred if not is_multivariate else x_vis,
+                            ax, scores_text_color)
+
+        # Points labels
+        if pts_label_field is not None :
+            
+            # Use coordinates of x variable
+            if not is_multivariate:
+                df_out=data.copy()
+                x_coords_label = x_label
+                y_coords_label = y_label
+
+            # Use the coordinates of the prediction
+            else:
+                x_coords_label = f"pred_{y_label}"
+                y_coords_label = y_label 
+
+            for x, y, label in zip(df_out[x_coords_label], df_out[y_coords_label], df_out[pts_label_field]):
+                ax.annotate(
+                    label,
+                    (x,y),
+                    xytext=(4,4),
+                    textcoords='offset points',
+                    fontsize=8,
+                    alpha=0.8
+                )
+
+        ax.set_xlabel(x_vis_label)
+        ax.set_ylabel(y_vis_label)
+
+        if xbound is not None:
+            ax.set_xbound(xbound)
+        if ybound is not None:
+            ax.set_ybound(ybound)
+
         return ax, model, df_out
 
     return model, df_out
 
-def preprocess_data(x, y, data, x_label='predictor', y_label='dependant'):
-    is_multivariate = False
+
+# =====================================================
+# Preprocessing
+# =====================================================
+
+def preprocess_data(x, y, data, x_label, y_label):
+
     if data is not None:
         if isinstance(x, list):
-            x_vals = data[x].values
+            X = data[x].values
             is_multivariate = True
         else:
-            x_vals = data[x].values.reshape(-1, 1)
+            X = data[x].values.reshape(-1, 1)
+            is_multivariate = False
+
         y_vals = data[y].values
-        if isinstance(x, list):
-            x_label = " + ".join(x) if x_label == 'predictor' else x_label
-        else:
-            x_label = x if x_label == 'predictor' else x_label
-        y_label = y if y_label == 'dependant' else y_label
+        df_out = data.copy()
+
+        if x_label == 'predictor':
+            x_label = " + ".join(x) if isinstance(x, list) else x
+        if y_label == 'dependant':
+            y_label = y
+
     else:
-        x_vals = np.array(x)
-        if len(x_vals.shape) == 1:
-            x_vals = x_vals.reshape(-1, 1)
-        elif len(x_vals.shape) > 1:
+        X = np.array(x)
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+            is_multivariate = False
+        else:
             is_multivariate = True
+
         y_vals = np.array(y)
-    return x_vals, y_vals, x_label, y_label, is_multivariate
+        df_out = pd.DataFrame({'y': y_vals})
 
-def fit_linear_model(x, y):
-    model = LinearRegression().fit(x, y)
-    return model
+    return X, y_vals, x_label, y_label, is_multivariate, df_out
 
-def plot_linear_relation(
-    x, y, model, x_label, y_label, ax=None, title='linear data visualisation',
-    data=None, hue=None, palette_dict=None, hue_order=None, s=1, alpha=None,
-    pts_color='black', reg_line_color='red', reg_line_alpha=1, reg_line_width=1, reg_line_style='solid',
-    scores_text_color='black', xbound=None, ybound=None, show_score=True, show_legend=True,
-    get_mad=False, mad_lines_color=None, x_units=None, y_units=None,
-    show_reg_line_label=True, reg_line_label_note='', is_multivariate=False
+
+# =====================================================
+# Plot helpers
+# =====================================================
+
+def plot_scatter(
+    x, y, ax, hue, palette_dict,
+    s, alpha, pts_color, show_legend, data
 ):
-    # Create figure
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 6))
-    ax.set_title(title)
-
-    # If multi-predictor: plot pred_y vs actual y
-    if is_multivariate:
-        # Multi-predictor: predicted vs actual
-        y_pred = model.predict(x)
-        # Safe column-like label
-        x_vis_label = f"pred_{y_label.lower().replace(' ', '_')}"
-        y_vis = y
-
-        # Scatter plot using arrays, not DataFrame columns
-        sns.scatterplot(x=y_pred.flatten(), y=y_vis, ax=ax, color=pts_color, s=s, alpha=alpha)
-
-        # Regression line (y=x)
-        sns.lineplot(x=y_pred.flatten(), y=y_pred.flatten(), ax=ax,
-                    color=reg_line_color, linewidth=reg_line_width, alpha=reg_line_alpha, linestyle=reg_line_style)
-
-        # MAD lines
-        if get_mad:
-            plot_mad_lines(y_pred, y_vis, y_pred, ax, mad_lines_color, reg_line_color)
-
-        # Score text
-        if show_score:
-            add_scores_text(y_pred, y_vis, y_pred, ax, scores_text_color)
-
-    # Axes labels
-    ax.set_xlabel(x_label if not is_multivariate else "pred_" + y_label)
-    ax.set_ylabel(y_label)
-
-    # Bounds
-    if xbound is not None:
-        ax.set_xbound(xbound)
-    if ybound is not None:
-        ax.set_ybound(ybound)
-
-    return ax
-
-def plot_scatter(x, y, data, x_label, y_label, ax, hue, palette_dict, hue_order, s, alpha, pts_color, show_legend):
-    if data is None:
-        sns.scatterplot(x=x.flatten(), y=y, ax=ax, color=pts_color, s=s)
+    if hue is not None and hue in data.columns:
+        sns.scatterplot(
+            x=x, y=y, ax=ax, hue=data[hue],
+            palette=palette_dict, s=s, alpha=alpha, legend=show_legend
+        )
     else:
         sns.scatterplot(
-            data=data, x=x_label, y=y_label, ax=ax, color=pts_color, palette=palette_dict,
-            s=s, hue=hue, hue_order=hue_order, alpha=alpha, legend=show_legend
+            x=x, y=y, ax=ax, color=pts_color, s=s, alpha=alpha
         )
 
-def plot_regression_line(x, y_pred, model, ax, x_label, y_label,
-                         color='red', width=1, alpha=1, style='solid', show_label=True, label_note='', x_units=None, y_units=None):
+
+def plot_regression_line(
+    x, y_pred, model, ax, x_label, y_label,
+    color, width, alpha, style,
+    show_label, label_note, x_units, y_units
+):
     if model is not None and show_label:
         if x_units is None: x_units = x_label
         if y_units is None: y_units = y_label
-        label = f"{label_note}{model.intercept_:.2f}{y_units} + {model.coef_[0]:.10f}*{x_units}"
+        label = f"{label_note}{model.intercept_:.3f}{y_units} + {model.coef_[0]:.6f}*{x_units}"
     else:
         label = None
-    sns.lineplot(x=x.flatten(), y=y_pred, ax=ax, color=color, linewidth=width, alpha=alpha, label=label, linestyle=style)
+
+    sns.lineplot(
+        x=x, y=y_pred, ax=ax,
+        color=color, linewidth=width,
+        alpha=alpha, linestyle=style, label=label
+    )
+
 
 def plot_mad_lines(x, y_true, y_pred, ax, mad_lines_color, default_color):
     color = mad_lines_color or default_color
     mad = 0
-    for xi, yt, yp in zip(x.flatten(), y_true, y_pred):
+    for xi, yt, yp in zip(x, y_true, y_pred):
         sns.lineplot(x=[xi, xi], y=[yt, yp], ax=ax, color=color)
         mad += abs(yt - yp)
     mad /= len(x)
-    print(f"MAD: {mad}")
+    print(f"MAD: {mad:.4f}")
+
 
 def add_scores_text(x, y_true, y_pred, ax, scores_text_color):
     r2_val = r2_score(y_true, y_pred)
     xlim, ylim = ax.get_xlim(), ax.get_ylim()
-    x_pos = xlim[1] - 0.02 * (xlim[1] - xlim[0])
-    y_pos = ylim[0] + 0.02 * (ylim[1] - ylim[0])
-    ax.text(x_pos, y_pos, f"r2: {round(r2_val, 2)}",
-        fontsize=10, verticalalignment='bottom',
-        horizontalalignment='right', color=scores_text_color,
-        bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
+    ax.text(
+        xlim[1] - 0.02*(xlim[1]-xlim[0]),
+        ylim[0] + 0.02*(ylim[1]-ylim[0]),
+        f"r2: {r2_val:.3f}",
+        fontsize=10, ha='right', va='bottom',
+        color=scores_text_color,
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.7)
+    )
 
 
 def get_anova(df, hue, y, equal_var=True, nan_policy='raise'):

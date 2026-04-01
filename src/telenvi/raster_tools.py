@@ -41,6 +41,8 @@ from osgeo import gdal, gdalconst, osr, ogr
 from shapely.errors import ShapelyDeprecationWarning
 import tempfile
 
+# Richdem
+warnings.filterwarnings("ignore", category=UserWarning, module="richdem")
 import richdem as rd
 
 VERBOSE=True

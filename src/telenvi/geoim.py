@@ -864,3 +864,15 @@ array type : {self.array.dtype}""")
         Apply gaussian filter on the raster
         """
         return rt.apply_blur(self, r)
+    
+    def binarize(self, threshold):
+        """
+        Return a binary GeoImage:
+        - 1 where values > threshold
+        - 0 otherwise (including == threshold and NaN)
+        """
+        bin_geoim = self.copy()
+        arr = np.array(bin_geoim.array, copy=True)  # ensure no shared memory
+        bin_arr = (arr > threshold).astype(np.uint8)
+        bin_geoim.array = bin_arr
+        return bin_geoim
