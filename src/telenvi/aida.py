@@ -106,6 +106,15 @@ def contrast(target, c):
     target_contrasted = contrast_enhancer.enhance(c)
     return target_contrasted
 
+def sharp(target, radius=2, percent=150, threshold=3):
+
+    # Create filter
+    sharp_filter = ImageFilter.UnsharpMask(radius, percent, threshold)
+
+    # Apply it to the image
+    target_sharpened = target.filter(sharp_filter)
+    return target_sharpened
+
 def canny(target, l, h):
 
     # Convert our image into numpy array
@@ -323,7 +332,7 @@ def shift_hist(input_target, breakpoint):
 
     return shifted_array
 
-def get_manual_clusters(input_target, thresholds):
+def get_manual_clusters(input_target, thresholds, values_style='median'):
 
     if type(thresholds) == list:
         thresholds = np.array(thresholds)
@@ -335,7 +344,9 @@ def get_manual_clusters(input_target, thresholds):
     thresholds = [float('-inf')] + sorted(thresholds) + [float('inf')]
 
     # Classify
-    bins = np.digitize(input_array, bins=thresholds).astype(input_array.dtype)
+    bins = np.digitize(input_array, bins=thresholds).astype(input_array.dtype) - 1
+
+    # Write the median values of the input_array
 
     # Put the array in a geoim
     if input_is_geoim:

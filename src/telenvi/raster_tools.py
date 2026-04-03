@@ -1359,9 +1359,13 @@ def get_surf_in_raster_range(target, aoi, b_inf, b_sup, epsg=2056, show=False, v
     else:
         return surf_in_alti_range
 
-def apply_blur(target, r=5):
+def _process_geoim(target, process_func):
     """
-    Apply Gaussian filter from Pillow
+    Shared helper to:
+    - Ensure Geoim object
+    - Convert to PIL
+    - Apply processing function
+    - Convert back to Geoim
     """
     if type(target) != geoim.Geoim:
         target = Open(target, load_pixels=True)
@@ -1369,12 +1373,31 @@ def apply_blur(target, r=5):
     # Convert to pillow object
     target_pil = aida.geo_monoband_to_pil(target)
 
-    # Apply filter
-    target_blurred = aida.blur(target_pil, r=r)
+    # Apply processing function
+    processed_pil = process_func(target_pil)
 
-    # Get back to geoim
-    target_geo_blurred = aida.mono_im_to_geo_mono(target_blurred, target)
-    return target_geo_blurred    
+    # Convert back to geoim
+    return aida.mono_im_to_geo_mono(processed_pil, target)
+
+
+def apply_sharp(target, radius=2, percent=150, threshold=3):
+    """
+    Apply sharp filter from Pillow
+    """
+    return _process_geoim(
+        target,
+        lambda img: aida.sharp(img, radius, percent, threshold)
+    )
+
+
+def apply_blur(target, r=5):
+    """
+    Apply Gaussian filter from Pillow
+    """
+    return _process_geoim(
+        target,
+        lambda img: aida.blur(img, r=r)
+    )   
 
 def clip_a_b(target_a, target_b, nRes=None):
     """

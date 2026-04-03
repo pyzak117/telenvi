@@ -864,7 +864,13 @@ array type : {self.array.dtype}""")
         Apply gaussian filter on the raster
         """
         return rt.apply_blur(self, r)
-    
+
+    def apply_sharp(self, radius=2, percent=150, threshold=3):
+        """
+        Apply gaussian filter on the raster
+        """
+        return rt.apply_sharp(self, radius, percent, threshold)
+
     def binarize(self, threshold):
         """
         Return a binary GeoImage:
@@ -876,3 +882,62 @@ array type : {self.array.dtype}""")
         bin_arr = (arr > threshold).astype(np.uint8)
         bin_geoim.array = bin_arr
         return bin_geoim
+
+    def bin_geoim_get_positive_part_in_geo_row(self, georow):
+        """
+        Compute the percentage of area within a geometry where the raster equals 1.
+
+        Parameters
+        ----------
+        georow : GeoPandas georow
+            A georow containing a polygon geometry (georow.geometry).
+        bin_geoim : GeoImage-like object
+            Binary raster (values 0/1) with methods:
+            - maskFromVector(geometry, epsg)
+            - unmask()
+            - getPixelSize()
+            - .array (NumPy masked array)
+
+        Returns
+        -------
+        float
+            Percentage (%) of the polygon area where raster value == 1.
+
+        Notes
+        -----
+        - **Assumes raster is already binarized (0/1)**
+        - Uses masked array sum to ignore pixels outside the geometry.
+        - Geometry and raster must be in the same CRS (EPSG:2056 here).
+        """
+
+        if len(np.unique(self.array)) > 2:
+            raise ValueError('raster not binarized')
+
+        # Create a raster by rasterizing the rock glacier
+        raster_georow = vt.rasterize(
+            gpd.GeoDataFrame([georow]).set_crs(epsg=2056),
+            pixel_size=self.getPixelSize()[0],
+            burn_value=1,
+            load_pixels=True)
+
+        # Crop the bin geoim on the rock glacier extent
+        cropped_bin_geoim = rt.geoim.Geoim(rt.cropFromVector(self, georow.geometry))
+
+        # Ensure same arrays sizes
+        raster_georow, clipped_bin_geoim = rt.clip_a_b(raster_georow, cropped_bin_geoim)
+
+        # Compute the pixels where the bin_geoim == 1 AND the rock glacier raster is 1 as well
+        clipped_bin_geoim_ar = clipped_bin_geoim.array
+        raster_georow_ar = raster_georow.array 
+        match_array = clipped_bin_geoim_ar + raster_georow_ar
+
+        # Count rock glacier pixels
+        count_rg_pixels = len(raster_georow_ar[raster_georow_ar == 1])
+
+        # --- Count pixels above the threshold
+        count_pixels = len(match_array[match_array == 2])
+
+        # --- Compute percentage relative to polygon area ---
+        georow_p_above = (count_pixels / count_rg_pixels) * 100
+
+        return georow_p_above
