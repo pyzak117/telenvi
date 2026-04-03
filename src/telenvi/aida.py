@@ -109,6 +109,7 @@ def contrast(target, c):
 def sharp(target, radius=2, percent=150, threshold=3):
 
     # Create filter
+    print(radius, percent, threshold)
     sharp_filter = ImageFilter.UnsharpMask(radius, percent, threshold)
 
     # Apply it to the image

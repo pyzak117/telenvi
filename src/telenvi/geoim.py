@@ -423,8 +423,6 @@ array type : {self.array.dtype}""")
         The argument 'band' is refering to matrixian indexes, so the
         band 1 have the index 0.
         """
-        print('call to geoim min')
-        print(type(self.array))
         if band is None:
             return ma.min(self.array)
         else:
@@ -436,8 +434,6 @@ array type : {self.array.dtype}""")
         The argument 'band' is refering to matrixian indexes, so the
         band 1 have the index 0.
         """
-        print('call to geoim max')
-        print(type(self.array))
         if band is None:
             return ma.max(self.array)
         else:
@@ -941,3 +937,11 @@ array type : {self.array.dtype}""")
         georow_p_above = (count_pixels / count_rg_pixels) * 100
 
         return georow_p_above
+
+    def fill_negative_values(self):
+        # Fill the possible -9999 values on the edges of the DEM filled
+        # Thanks to the buffer, we are safe it will not touch the rock glacier
+        ar=self.array
+        valid_min = ar[ar>0].mean()
+        ar[ar<0] = valid_min
+        self.array=ar
