@@ -318,6 +318,10 @@ array type : {self.array.dtype}""")
         With a much more simple process than the previous version
         Still to harmonize the types of object returned by the method
         """
+
+        if type(gdf) == gpd.GeoSeries:
+            gdf = gpd.GeoDataFrame([gdf])
+
         pxs = self.getPixelSize()[0]
         r_gdf = vt.rasterize(gdf, pxs)
 
@@ -337,11 +341,11 @@ array type : {self.array.dtype}""")
 
             # Use it as a mask
             clipped.array = ma.masked_array(data=clipped.array, mask=mask)
+            return clipped.array
 
         else:
             clipped.array[r_gdf.array == 0] = maskValue
-
-        return clipped
+            return clipped
 
     def maskFromVector(self, vector, epsg, inside=True, verbose=False):
         """
