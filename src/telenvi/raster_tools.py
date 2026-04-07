@@ -1389,6 +1389,17 @@ def apply_sharp(target, radius=2, percent=150, threshold=3):
         lambda img: aida.sharp(img, radius, percent, threshold)
     )
 
+def apply_canny(target, l, h):
+    return _process_geoim(
+        target,
+        lambda img: aida.canny(img, l=l, h=h)
+    )
+
+def apply_contrast(target, c):
+    return _process_geoim(
+        target,
+        lambda img: aida.contrast(img, c=c)
+    )   
 
 def apply_blur(target, r=5):
     """

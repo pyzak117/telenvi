@@ -117,6 +117,27 @@ def sharp(target, radius=2, percent=150, threshold=3):
     return target_sharpened
 
 def canny(target, l, h):
+    """
+    Perform Canny edge detection on a grayscale image.
+
+    Detects edges by computing image gradients and applying hysteresis
+    with two thresholds to classify strong and weak edges.
+
+    Parameters
+    ----------
+    h : float
+        Lower threshold for edge linking (weak edge threshold).
+    l : float
+        Upper threshold for strong edge detection.
+
+    Notes
+    -----
+    - Pixels with gradient ≥ l are considered strong edges.
+    - Pixels with gradient between h and l are kept
+      only if connected to strong edges.
+    - Pixels below h are discarded.
+    - For best results, apply Gaussian blur before edge detection.
+    """
 
     # Convert our image into numpy array
     target_array = np.array(target)

@@ -312,6 +312,37 @@ array type : {self.array.dtype}""")
 
         return self.array
 
+    def maskFromVector_v2(self, gdf, maskValue=0, mode=None):
+        """
+        Return a copy of the instance with the raster values outside of the gdf by maskValue
+        With a much more simple process than the previous version
+        Still to harmonize the types of object returned by the method
+        """
+        pxs = self.getPixelSize()[0]
+        r_gdf = vt.rasterize(gdf, pxs)
+
+        # Crop
+        cropped = Geoim(rt.cropFromRaster(self, r_gdf))
+
+        # Clip
+        clipped, r_gdf = rt.clip_a_b(cropped, r_gdf)
+
+        # Mask
+        if mode == 'ma':
+
+            # Invert 0 and 1
+            mask = r_gdf.array
+            mask = mask.astype(np.int8)
+            mask = (mask * -1) + 1
+
+            # Use it as a mask
+            clipped.array = ma.masked_array(data=clipped.array, mask=mask)
+
+        else:
+            clipped.array[r_gdf.array == 0] = maskValue
+
+        return clipped
+
     def maskFromVector(self, vector, epsg, inside=True, verbose=False):
         """
         change the instance array into masked_array.
@@ -854,6 +885,18 @@ array type : {self.array.dtype}""")
         binf, bsup : int
         """
         return rt.get_surf_in_raster_range(self, aoi, b_inf, b_sup, epsg=epsg, show=show, vectorize_result=vectorize_result, kernel_size=kernel_size)
+
+    def apply_canny(self, l, h):
+        """
+        Apply Canny Detection algorithm on the raster
+        """
+        return rt.apply_canny(self, l, h)
+
+    def apply_contrast(self, c):
+        """
+        Apply Contrast enhancement filter on the raster
+        """
+        return rt.apply_contrast(self, c)
 
     def apply_blur(self, r=5):
         """
