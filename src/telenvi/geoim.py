@@ -312,7 +312,7 @@ array type : {self.array.dtype}""")
 
         return self.array
 
-    def maskFromVector_v2(self, gdf, maskValue=0, mode=None):
+    def maskFromVector_v2(self, gdf, maskValue=0, mode=None, epsg=2056):
         """
         Return a copy of the instance with the raster values outside of the gdf by maskValue
         With a much more simple process than the previous version
@@ -320,7 +320,7 @@ array type : {self.array.dtype}""")
         """
 
         if type(gdf) == gpd.GeoSeries:
-            gdf = gpd.GeoDataFrame([gdf])
+            gdf = gpd.GeoDataFrame([gdf]).set_crs(epsg=epsg)
 
         pxs = self.getPixelSize()[0]
         r_gdf = vt.rasterize(gdf, pxs)
@@ -956,18 +956,22 @@ array type : {self.array.dtype}""")
         if len(np.unique(self.array)) > 2:
             raise ValueError('raster not binarized')
 
+        geodf = gpd.GeoDataFrame([georow]).set_crs(epsg=2056)
+
         # Create a raster by rasterizing the rock glacier
         raster_georow = vt.rasterize(
-            gpd.GeoDataFrame([georow]).set_crs(epsg=2056),
+            geodf,
             pixel_size=self.getPixelSize()[0],
             burn_value=1,
             load_pixels=True)
 
-        # Crop the bin geoim on the rock glacier extent
-        cropped_bin_geoim = rt.geoim.Geoim(rt.cropFromVector(self, georow.geometry))
+        clipped_bin_geoim = self.maskFromVector_v2(geodf)
 
-        # Ensure same arrays sizes
-        raster_georow, clipped_bin_geoim = rt.clip_a_b(raster_georow, cropped_bin_geoim)
+        # # Crop the bin geoim on the rock glacier extent
+        # cropped_bin_geoim = rt.geoim.Geoim(rt.cropFromVector(self, georow.geometry))
+
+        # # Ensure same arrays sizes
+        # raster_georow, clipped_bin_geoim = rt.clip_a_b(raster_georow, cropped_bin_geoim)
 
         # Compute the pixels where the bin_geoim == 1 AND the rock glacier raster is 1 as well
         clipped_bin_geoim_ar = clipped_bin_geoim.array
