@@ -18,6 +18,7 @@ from osgeo import gdal, ogr, osr
 from tqdm import tqdm
 import math
 from telenvi import raster_tools as rt
+from shapely.geometry.base import BaseGeometry
 
 swissTopoMap = cx.providers.SwissFederalGeoportal.NationalMapColor
 swissTopoMapGr = cx.providers.SwissFederalGeoportal.NationalMapGrey
@@ -624,6 +625,9 @@ def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte, load_pi
     - transform: GDAL geotransform tuple
     """
 
+    if gdf.geometry.iloc[0] is None:
+        return None
+
     # Reproject to EPSG:2056 if necessary
     if gdf.crs.to_epsg() != 2056:
         gdf = gdf.to_crs(2056)
@@ -914,3 +918,11 @@ def get_centroids(gdf):
     foo = gdf.copy()
     foo['geometry'] = gdf.geometry.centroid
     return foo
+
+def safe_to_wkt(g):
+    """
+    Ensure valid transformation to wkt of a geometry
+    """
+    if isinstance(g, BaseGeometry):
+        return shapely.to_wkt(g)
+    return None

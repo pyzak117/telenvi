@@ -1081,6 +1081,24 @@ def preProcessDem(dem):
 
     return dem, dem_rdarray
 
+def getCurvature(dem, attrib):
+    """
+    Bridge towards RichDem curvature algorithms
+    attrib can be 
+        - 'profile_curvature' 
+        - 'planform_curvature'
+        - 'curvature'
+    """
+    # Pre process the dem
+    dem, dem_rdarray = preProcessDem(dem)
+
+    # Process
+    output_array = np.array(rd.TerrainAttribute(dem_rdarray, attrib=attrib))
+
+    # Create a Geoim
+    geo_output = geoim.Geoim(dem.ds, output_array)
+    return geo_output
+
 def getSlope(dem):
     """
     Compute slope in degrees from a dem 

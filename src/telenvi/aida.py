@@ -175,54 +175,50 @@ def get_array(input_target):
 
     return output_array, input_is_geoim
 
-def get_clusters_kmeans_y1_y2(y1, y2, n_clusters, n_init=10, random_state=None):
+def get_clusters_kmeans(
+    *ys,
+    df=None,
+    columns=None,
+    n_clusters=3,
+    n_init=10,
+    random_state=None
+    ):
     """
-    y1, y2 : 1D arrays with the same shape
-    n_clusters : int, number of clusters to create
-    n_init : int
-    """
-    
-    # Transformation de la matrice d'entrée pour qu'elle soit valide vis à vis du k-means
-    input_array = np.array((y1, y2)).T
+    Flexible KMeans clustering
 
-    # Créée un estimateur KMeans vide
+    Option 1:
+        get_clusters_kmeans(y1, y2, y3, ...)
+
+    Option 2:
+        get_clusters_kmeans(df=df, columns=["col1", "col2", ...])
+
+    Returns:
+        labels, barycentres, estimator
+    """
+
+    # --- Case 1: DataFrame input ---
+    if df is not None and columns is not None:
+        sub = df.dropna(subset=columns)
+        input_array = sub[columns].values
+
+    # --- Case 2: raw arrays ---
+    elif len(ys) > 0:
+        input_array = np.column_stack(ys)
+
+    else:
+        raise ValueError("Provide either arrays (*ys) or (df + columns)")
+
+    # --- KMeans ---
     estimator = cluster.KMeans(
-        n_clusters=n_clusters, 
+        n_clusters=n_clusters,
         n_init=n_init,
-        random_state=random_state)
+        random_state=random_state
+    )
 
-    # Charge les données dans l'estimateur
     estimator.fit(input_array)
 
-    # Extrait les labels
     labels = estimator.labels_
-
-    # Extrait les barycentres
     barycentres = estimator.cluster_centers_
-
-    return labels, barycentres, estimator
-
-def get_clusters_kmeans_from_df(df, y1, y2, n_clusters, n_init=10, random_state=None):
-    """
-    df : pandas dataframe
-    y1, y2 : strings, column names of the dataframe
-    n_clusters : int, number of clusters to create
-    n_init : int
-    """
-
-    sub = df.dropna(subset=[y1, y2])
-
-    # Extract the two columns
-    y1_array = sub[y1].values
-    y2_array = sub[y2].values
-
-    # Get the clusters
-    labels, barycentres, estimator = get_clusters_kmeans_y1_y2(
-        y1_array, 
-        y2_array, 
-        n_clusters=n_clusters, 
-        n_init=n_init,
-        random_state=random_state)
 
     return labels, barycentres, estimator
 
@@ -962,8 +958,27 @@ def get_w(
 
     return w
 
-def normalize_array(x):
-    return (x - x.min()) / (x.max() - x.min())
+def normalize_array(x, A=0, B=1):
+    """
+    Min-max scaling of x to range [A, B].
+
+    Parameters:
+        x : array-like
+        A : float, lower bound of target range
+        B : float, upper bound of target range
+    """
+
+    x_min = np.min(x)
+    x_max = np.max(x)
+
+    # Edge case where all the values are identical
+    # The, division by 0 (x_max - x_min) will raise an error
+    if x_max == x_min:
+
+        # Full_like return an array with the shape of x, where all the values are equals to our A argument
+        return np.full_like(x, A, dtype=float)
+
+    return A + (B - A) * (x - x_min) / (x_max - x_min)
 
 def get_y_from_x_on_linear_regmodel(linear_regression_model):
     print(f"{linear_regression_model.coef_[0]}x + {linear_regression_model.intercept_}")
@@ -1014,6 +1029,23 @@ def assign_color_from_clusters(target_df, cluster_field, cmap='tab20'):
 
     return target_df
 
+def from1D_to_2D_with_mask(data, mask, geotemplate, mask_value=-1):
+
+    # # Création d'un geoim d'accueil de la future matrice 2D et instanciation de la matrice
+    geodims = geotemplate.array.shape
+    geo_foo = geotemplate.copy()
+    
+    # # Création d'une nouvelle matrice pleine de zéros aux dimensions de la matrice masquée
+    foo_ar = np.zeros(mask.shape)
+    
+    # # Application du masque sur la matrice plate
+    foo_ar[mask == False] = mask_value
+    foo_ar[mask == True] = data
+    
+    # # Retransformation en 2D à partir des dimensions de la matrice originelle
+    geo_foo_ar = foo_ar.reshape(geodims)
+    geo_foo.array = geo_foo_ar
+    return geo_foo
 
 def add_groups_legend(ax, target_df, column, show_counts=True, legend_fontsize=8, legend_loc='upper right', show_bounds=None, bounds_field=None, rounder=2, labels_order=None):
     """

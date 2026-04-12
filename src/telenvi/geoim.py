@@ -330,6 +330,8 @@ array type : {self.array.dtype}""")
 
         # Clip
         clipped, r_gdf = rt.clip_a_b(cropped, r_gdf)
+        if maskValue not in (0,1):
+            clipped.array = clipped.array.astype(np.int32)
 
         # Mask
         if mode == 'ma':
@@ -957,6 +959,9 @@ array type : {self.array.dtype}""")
             raise ValueError('raster not binarized')
 
         geodf = gpd.GeoDataFrame([georow]).set_crs(epsg=2056)
+        if len(geodf) == 0:
+            print('len 0')
+            return None
 
         # Create a raster by rasterizing the rock glacier
         raster_georow = vt.rasterize(
@@ -964,6 +969,9 @@ array type : {self.array.dtype}""")
             pixel_size=self.getPixelSize()[0],
             burn_value=1,
             load_pixels=True)
+
+        if raster_georow is None:
+            return None
 
         clipped_bin_geoim = self.maskFromVector_v2(geodf)
 
@@ -980,6 +988,8 @@ array type : {self.array.dtype}""")
 
         # Count rock glacier pixels
         count_rg_pixels = len(raster_georow_ar[raster_georow_ar == 1])
+        if count_rg_pixels == 0:
+            return -1
 
         # --- Count pixels above the threshold
         count_pixels = len(match_array[match_array == 2])
