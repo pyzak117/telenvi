@@ -19,6 +19,8 @@ from tqdm import tqdm
 import math
 from telenvi import raster_tools as rt
 from shapely.geometry.base import BaseGeometry
+import sqlite3
+import os
 
 swissTopoMap = cx.providers.SwissFederalGeoportal.NationalMapColor
 swissTopoMapGr = cx.providers.SwissFederalGeoportal.NationalMapGrey
@@ -659,15 +661,29 @@ def rasterize(gdf, pixel_size=10, burn_value=1, out_dtype=gdal.GDT_Byte, load_pi
     data_source = drv.CreateDataSource('memData')
     layer = data_source.CreateLayer('layer', srs, ogr.wkbPolygon)
 
+    # Add the field to the ogr layer
+    if type(burn_value) == str:
+        layer.CreateField(ogr.FieldDefn(burn_value, ogr.OFTReal))
+
     # Add features
     for _, row in gdf.iterrows():
         feature = ogr.Feature(layer.GetLayerDefn())
         geom = ogr.CreateGeometryFromWkb(row.geometry.wkb)
         feature.SetGeometry(geom)
+
+        # Add the row field value to the ogr feature
+        if type(burn_value) == str:
+            feature.SetField(burn_value, row[burn_value])
+
         layer.CreateFeature(feature)
 
+    # Rasterize with the field
+    if type(burn_value) == str:
+        gdal.RasterizeLayer(mem_raster, [1], layer, options=[f"ATTRIBUTE={burn_value}"])        
+
     # Rasterize all geometries with burn_value
-    gdal.RasterizeLayer(mem_raster, [1], layer, burn_values=[burn_value])
+    else:
+        gdal.RasterizeLayer(mem_raster, [1], layer, burn_values=[burn_value])
 
     if load_pixels:
         return rt.Open(mem_raster, load_pixels=True)
@@ -907,7 +923,7 @@ def get_surf_covered_by_contents_in_container(contents, container):
     """
     Return the sum of the surface covered by the contents (can be many features) within the container
     contents : geodataframe
-    container : geodataframe - /!\ Must contain one feature
+    container : geodataframe - Must contain one feature
     """
     if len(container) > 1:
         print('vector_tools here : container have more than 1 feature')
@@ -926,3 +942,62 @@ def safe_to_wkt(g):
     if isinstance(g, BaseGeometry):
         return shapely.to_wkt(g)
     return None
+
+def check_gpkg(gpkg_path: str, layer_name: str) -> bool:
+    """
+    Returns True only if both file and layer exist.
+    Returns False if file is missing OR layer is missing.
+    """
+    if not os.path.isfile(gpkg_path):
+        return False
+    
+    try:
+        with sqlite3.connect(gpkg_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM gpkg_contents WHERE table_name = ?",
+                (layer_name,)
+            )
+            return cursor.fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+def get_left_right_quantile(left_gdf, right_gdf, field, q=0.5, out_field_name=None, predicate='intersects', erase_existing_field=False):
+    """
+    create a new field in the right_gdf by computing quantile q of left_samples geographically located in right samples
+    """
+    
+    # Default creation of output field name based on input field and q
+    if out_field_name is None:
+        out_field_name = f"q{q}_{field}"
+    
+    # Check if the field already exists
+    if out_field_name in right_gdf.columns and not erase_existing_field:
+        return right_gdf
+        
+    # Define function which works for one polygon
+    def _row_func(right_row):
+        right_row_gdf = gpd.GeoDataFrame([right_row])
+        left_samples_in_right_row = spatial_selection(left_gdf, right_row_gdf, predicate=predicate)
+        return left_samples_in_right_row[field].quantile(q)
+
+    # Apply it to the whole geodataframe of polygons (right)
+    tqdm.pandas()
+    right_gdf[out_field_name] = right_gdf.progress_apply(lambda right_row: _row_func(right_row), axis=1)
+
+    return right_gdf
+
+def count_points(pts, polygons, field_name='n_pts'):
+    """
+    Count the number of pts samples within each polygons
+    """
+    if field_name in polygons.columns:
+        return polygons
+
+    def _row_func(polygon_row):
+        pol_gdf = gpd.GeoDataFrame([polygon_row])
+        pts_in_pol = spatial_selection(pts, pol_gdf, predicate='intersects')
+        return len(pts_in_pol)
+    tqdm.pandas()
+    polygons[field_name] = polygons.progress_apply(lambda pt_row: _row_func(pt_row), axis=1)
+    return polygons

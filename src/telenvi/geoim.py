@@ -329,7 +329,7 @@ array type : {self.array.dtype}""")
         cropped = Geoim(rt.cropFromRaster(self, r_gdf))
 
         # Clip
-        clipped, r_gdf = rt.clip_a_b(cropped, r_gdf)
+        clipped, r_gdf = rt.clip_many((cropped, r_gdf))
         if maskValue not in (0,1):
             clipped.array = clipped.array.astype(np.int32)
 
@@ -916,7 +916,7 @@ array type : {self.array.dtype}""")
         """
         return rt.apply_sharp(self, radius, percent, threshold)
 
-    def binarize(self, threshold):
+    def binarize(self, threshold, greater=True):
         """
         Return a binary GeoImage:
         - 1 where values > threshold
@@ -924,7 +924,10 @@ array type : {self.array.dtype}""")
         """
         bin_geoim = self.copy()
         arr = np.array(bin_geoim.array, copy=True)  # ensure no shared memory
-        bin_arr = (arr > threshold).astype(np.uint8)
+        if greater:
+            bin_arr = (arr > threshold).astype(np.uint8)
+        else:
+            bin_arr = (arr < threshold).astype(np.uint8)
         bin_geoim.array = bin_arr
         return bin_geoim
 

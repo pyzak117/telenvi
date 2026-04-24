@@ -1428,25 +1428,52 @@ def apply_blur(target, r=5):
         lambda img: aida.blur(img, r=r)
     )   
 
-def clip_a_b(target_a, target_b, nRes=None):
+def clip_many(targets, nRes=None):
     """
-    target_a, target_b : geoims
-    Caution : A and B needs to share the same geoextent
-    Resample A and B if asked
-    Crop A and B to arrays to ensure the same array size
+    Ensure all the targets Geoim have the same shape
+    Optionally resample before clipping
     """
 
-    # Resampling
+    if len(targets) == 0:
+        return targets
+
+    # Resample if requested
     if nRes is not None:
-        target_a = target_a.resize(nRes)
-        target_b = target_b.resize(nRes)
+        targets = [t.resize(nRes) for t in targets]
 
-    # Array crops
-    min_shape = np.minimum(target_a.array.shape, target_b.array.shape)
-    target_a.array = target_a.array[:min_shape[0], :min_shape[1]]
-    target_b.array = target_b.array[:min_shape[0], :min_shape[1]]
+    # Get shapes
+    shapes = np.array([t.array.shape for t in targets])
+    min_shape = np.min(shapes, axis=0)
 
-    return target_a, target_b
+    # Crop
+    for t in targets:
+        t.array = t.array[:min_shape[0], :min_shape[1]]
+
+    return targets
+
+def binary_geoims_get_part_of_geo_row_with_ones(geo_row, target_geoim, epsg=2056):
+    """
+    Sum the pixels == 1 in a binary raster located in a geo polygon
+    """
+
+    # Rasterize the polygon
+    gdf_row = gpd.GeoDataFrame([geo_row]).set_crs(epsg=epsg)
+    r_geo_row = vt.rasterize(gdf_row, target_geoim.getPixelSize()[0])
+
+    # Mask it from the geo polygon
+    raster_masked = target_geoim.maskFromVector_v2(gdf_row)
+
+    # Sum the pixels == 1 in the masked raster
+    n_ones = raster_masked.array.sum()
+
+    # Sum the number of pixels of the georow
+    n_pixels_in_geo_row = r_geo_row.array.sum()
+
+    # Ratio
+    ratio = n_ones / n_pixels_in_geo_row
+
+    return ratio
+
 
 #TODO if __name__ == "__main__":
 # 

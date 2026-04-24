@@ -17,6 +17,7 @@ from scipy import stats
 from sklearn.metrics import r2_score
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import classification_report, confusion_matrix
+from scipy.ndimage import uniform_filter
 
 # Visualisation libraries
 from matplotlib import pyplot as plt
@@ -175,11 +176,68 @@ def get_array(input_target):
 
     return output_array, input_is_geoim
 
+import numpy as np
+from sklearn import cluster
+
+def get_clusters_kmeans_with_mask(
+    *ys,
+    df=None,
+    columns=None,
+    n_clusters=None,
+    n_init=10,
+    random_state=None,
+    to_exclude=0
+):
+    """
+    Flexible KMeans clustering with optional value exclusion.
+
+    Parameters:
+        to_exclude: value to ignore in clustering (e.g. 0)
+
+    Returns:
+        labels_full, barycentres, estimator
+        (labels_full includes -1 for excluded pixels)
+    """
+
+    # --- Case 1: DataFrame input ---
+    if df is not None and columns is not None:
+        sub = df.dropna(subset=columns)
+        input_array = sub[columns].values
+        valid_mask = ~np.any(input_array == to_exclude, axis=1)
+
+    # --- Case 2: raw arrays ---
+    elif len(ys) > 0:
+        input_array = np.column_stack(ys)
+        valid_mask = ~np.any(input_array == to_exclude, axis=1)
+
+    else:
+        raise ValueError("Provide either arrays (*ys) or (df + columns)")
+
+    # --- Filter training data ---
+    input_valid = input_array[valid_mask]
+
+    # --- KMeans ---
+    estimator = cluster.KMeans(
+        n_clusters=n_clusters,
+        n_init=n_init,
+        random_state=random_state
+    )
+
+    estimator.fit(input_valid)
+
+    # --- Build full label array ---
+    labels_full = np.full(input_array.shape[0], -1, dtype=int)  # -1 = excluded
+    labels_full[valid_mask] = estimator.labels_
+
+    barycentres = estimator.cluster_centers_
+
+    return labels_full, barycentres, estimator
+
 def get_clusters_kmeans(
     *ys,
     df=None,
     columns=None,
-    n_clusters=3,
+    n_clusters=None,
     n_init=10,
     random_state=None
     ):
@@ -221,6 +279,63 @@ def get_clusters_kmeans(
     barycentres = estimator.cluster_centers_
 
     return labels, barycentres, estimator
+
+def get_clusters_dbscan(
+    *ys,
+    df=None,
+    columns=None,
+    eps=0.5,
+    min_samples=5
+):
+    """
+    Flexible DBSCAN clustering
+
+    Option 1:
+        get_clusters_dbscan(y1, y2, y3, ...)
+
+    Option 2:
+        get_clusters_dbscan(df=df, columns=["col1", "col2", ...])
+
+    Returns:
+        labels, barycentres, estimator
+    """
+
+    # --- Case 1: DataFrame input ---
+    if df is not None and columns is not None:
+        sub = df.dropna(subset=columns)
+        input_array = sub[columns].values
+
+    # --- Case 2: raw arrays ---
+    elif len(ys) > 0:
+        input_array = np.column_stack(ys)
+
+    else:
+        raise ValueError("Provide either arrays (*ys) or (df + columns)")
+
+    # --- DBSCAN ---
+    estimator = cluster.DBSCAN(
+        eps=eps,
+        min_samples=min_samples
+    )
+
+    labels = estimator.fit_predict(input_array)
+
+    # --- Compute barycentres (DBSCAN has none by default) ---
+    barycentres = []
+    unique_labels = set(labels)
+
+    for label in unique_labels:
+        if label == -1:
+            continue  # skip noise
+        
+        cluster_points = input_array[labels == label]
+        centre = np.mean(cluster_points, axis=0)
+        barycentres.append(centre)
+
+    barycentres = np.array(barycentres)
+
+    return labels, barycentres, estimator
+
 
 def predict_hue_from_y1_y2_from_arrays(y1, y2, model):
     """
@@ -412,6 +527,23 @@ def denoise_binary_image(binary_target, small_objects_min_size = 150, morpho_ope
         return out_geoim
     
     return filtered_regions
+
+def moving_window(target, smoothing_kernel_size=5):
+    """Apply a k×k uniform smoothing filter to a 2D array"""
+
+    # Extract array from input target
+    target_array, input_is_geoim = get_array(target)
+
+    # Apply filter
+    filtered_array = uniform_filter(target_array, size=smoothing_kernel_size, mode='nearest')
+
+    # Put the array in a geoim
+    if input_is_geoim:
+        out_geoim = target.copy()
+        out_geoim.array = filtered_array
+        return out_geoim
+    
+    return filtered_array
 
 def get_binary_contours_bis(binary_target, epsg=''):
 
@@ -900,63 +1032,6 @@ def show_density_contours(
         )
 
     return ax
-
-def get_w(
-    dem,
-    dir_ins,
-    e_w = 4,
-    s_w = 1,
-):
-    """
-    Compute an index (arbitrarily called "W) based on rasters of 2 drivers : direct insolation and altitude. 
-            
-    params:
-        dem : Geoim, the digital elevation model
-        dir_ins : Geoim, the direct insolation raster
-        e_w : float, the weight of the elevation driver
-        s_w : float, the weight of the direct insolation driver
-        save_w : bool, whether to save the resulting raster
-        out_path : str, the path to save the resulting directory where the raster will be saved
-        out_path_note : str, a note to add to the name of the resulting raster
-
-    return:
-        w : Geoim, the resulting W index raster
-
-    The W index is computed as follows:
-    - Normalize the elevation and direct insolation rasters between 0 and 1 across the study area
-    - Reverse the elevation values because higher elevation = lower temperature
-    - Compute the W index as a weighted sum of the normalized elevation and direct insolation rasters
-    - Normalize the W index between 0 and 1
-    - Invert the W index so that high values correspond to cold ground (low direct insolation and high elevation)
-
-    Note: This index is purely relative and has no physical meaning. It is only meant to be used as a relative index to compare different areas within the same study area.    
-    """
-
-    # Get the arrays from the geoims
-    e = dem.array
-    s = dir_ins.array
-
-    # Normalize values between 0 and 1 across our study area
-    e_norm = normalize_array(e)
-    s_norm = normalize_array(s)
-
-    # Reverse elevation because higher elevation = lower temperature
-    e_norm_inv = 1-e_norm
-
-    # Compute W index
-    w = (e_norm_inv * e_w) + (s_norm * s_w)
-
-    # Normalize it
-    w_norm = normalize_array(w)
-
-    # Invert it so that high value = cold ground
-    w_norm_inv = 1-w_norm
-
-    # Geometrize it
-    w = dir_ins.copy()
-    w.array = w_norm_inv
-
-    return w
 
 def normalize_array(x, A=0, B=1):
     """
