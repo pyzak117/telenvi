@@ -456,12 +456,18 @@ def count_overlap(gdf, epsg=2056):
     out_gdf = gpd.GeoDataFrame(pd.merge(new_gdf,overlapcount)).set_crs(epsg)
     return out_gdf
 
-def spatial_selection(left, right, cols_to_keep=[], predicate='within'):
+def spatial_selection(left, right, cols_to_keep=[], predicate='within', epsg=2056):
     """
-    content : GeoDataFrame, points, lines or polygons
-    container : GeoDataFrame, polygons 
-    return the rows of content which are inside container
+    left : GeoDataFrame, points, lines or polygons
+    right : GeoDataFrame, polygons 
+    return a new gdf with only the left samples which are matching the condition with right feature
     """
+
+    if type(left) != gpd.GeoDataFrame:
+        left = gpd.GeoDataFrame([left]).set_crs(epsg=epsg)
+
+    if type(right) != gpd.GeoDataFrame:
+        right = gpd.GeoDataFrame([right]).set_crs(epsg=epsg)
 
     # If user just send a string for 1 column no keep and not a list
     if type(cols_to_keep) == str:
@@ -1001,3 +1007,41 @@ def count_points(pts, polygons, field_name='n_pts'):
     tqdm.pandas()
     polygons[field_name] = polygons.progress_apply(lambda pt_row: _row_func(pt_row), axis=1)
     return polygons
+
+
+def get_neighbors(target_row, potential_neighboors_gdf, min_neighbors=0, neighbooring_buffer=0, predicate='intersects', epsg=2056):
+    """
+    target_row : gpd.GeoSeries
+    """
+    target_gdf = gpd.GeoDataFrame([target_row]).set_crs(epsg=epsg)
+    target_gdf['geometry'] = target_gdf.apply(lambda row: row.geometry.buffer(neighbooring_buffer), axis=1)
+    neighbors = vt.spatial_selection(potential_neighboors_gdf, target_gdf, predicate=predicate, cols_to_keep=[c + '_left' for c in potential_neighboors_gdf.columns])
+    neighbors.columns = [c.split('_left')[0] for c in neighbors.columns]
+    return neighbors
+
+def get_stats_on_neighboors(target_row, potential_neighboors_gdf, target_field, **kwargs):
+    """
+    return statistical aggregations of target_row.target_field
+    min, 0.1, 0.5, 0.9, max, sum, mean
+    kwargs are transmitted to get_neighbors
+    """
+    neighbors = get_neighbors(target_row, potential_neighboors_gdf, **kwargs)
+    return neighbors[target_field].min(), neighbors[target_field].quantile(0.1), neighbors[target_field].quantile(0.5), neighbors[target_field].quantile(0.9), neighbors[target_field].max(), neighbors[target_field].sum(), neighbors[target_field].mean()
+
+def get_moving_window_statistics(target_layer, target_field, **kwargs):
+    """
+    kwargs are transmitted to get_neighbors
+    """
+    output_layer = target_layer.copy()
+    output_layer.boundary.plot()
+    tqdm.pandas()
+    output_layer[[f'{target_field}_av_min',
+        f'{target_field}_av_tail',
+        f'{target_field}_av_med',
+        f'{target_field}_av_head',
+        f'{target_field}_av_max',
+        f'{target_field}_av_sum',
+        f'{target_field}_av_mean']
+        ] = output_layer.progress_apply(lambda target_row: get_stats_on_neighboors(target_row, target_layer, target_field, **kwargs), axis=1, result_type='expand')
+
+    return output_layer
