@@ -1008,14 +1008,13 @@ def count_points(pts, polygons, field_name='n_pts'):
     polygons[field_name] = polygons.progress_apply(lambda pt_row: _row_func(pt_row), axis=1)
     return polygons
 
-
-def get_neighbors(target_row, potential_neighboors_gdf, min_neighbors=0, neighbooring_buffer=0, predicate='intersects', epsg=2056):
+def get_neighbors(target_row, potential_neighboors_gdf, neighbooring_buffer=0, predicate='intersects', epsg=2056):
     """
     target_row : gpd.GeoSeries
     """
     target_gdf = gpd.GeoDataFrame([target_row]).set_crs(epsg=epsg)
     target_gdf['geometry'] = target_gdf.apply(lambda row: row.geometry.buffer(neighbooring_buffer), axis=1)
-    neighbors = vt.spatial_selection(potential_neighboors_gdf, target_gdf, predicate=predicate, cols_to_keep=[c + '_left' for c in potential_neighboors_gdf.columns])
+    neighbors = spatial_selection(potential_neighboors_gdf, target_gdf, predicate=predicate, cols_to_keep=[c + '_left' for c in potential_neighboors_gdf.columns])
     neighbors.columns = [c.split('_left')[0] for c in neighbors.columns]
     return neighbors
 
@@ -1030,10 +1029,10 @@ def get_stats_on_neighboors(target_row, potential_neighboors_gdf, target_field, 
 
 def get_moving_window_statistics(target_layer, target_field, **kwargs):
     """
+    apply get_stats_on_neighboors on the whole target_layer based on stats of target_field
     kwargs are transmitted to get_neighbors
     """
     output_layer = target_layer.copy()
-    output_layer.boundary.plot()
     tqdm.pandas()
     output_layer[[f'{target_field}_av_min',
         f'{target_field}_av_tail',
