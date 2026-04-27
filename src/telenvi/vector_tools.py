@@ -18,6 +18,7 @@ from osgeo import gdal, ogr, osr
 from tqdm import tqdm
 import math
 from telenvi import raster_tools as rt
+from telenvi import aida
 from shapely.geometry.base import BaseGeometry
 import sqlite3
 import os
@@ -1044,3 +1045,143 @@ def get_moving_window_statistics(target_layer, target_field, **kwargs):
         ] = output_layer.progress_apply(lambda target_row: get_stats_on_neighboors(target_row, target_layer, target_field, **kwargs), axis=1, result_type='expand')
 
     return output_layer
+
+def get_topo_zones(
+    target_polygon,
+    dem_src,
+    dem_pixel_size,
+    n_classes,
+    blurring_radius=0,
+    deblurring_buffer=0,
+    show_steps=False,
+    target_polygon_identifier_field=None
+    ):
+
+    """
+    Divide a polygon on n_classes zones based on a classification of the dem_src within the target_polygon
+    dem_src : the map of the dem tiles or directly the full dem (gdal dataset or geoim)
+    n_classes : number of topographic classes to create within each polygon
+    blurring_radius : radius of the blurring filter to smooth the contours, in pixels
+    deblurring_radius : radius of the buffer applied to target_polygon, to then remove the edge effect around the polygon after the blurring. Needs to be set proportionnally with pixel_size and blurring_radius.
+    """
+
+    target_polygon_buffered = target_polygon.copy()
+    target_polygon_buffered['geometry'] = target_polygon_buffered.geometry.buffer(deblurring_buffer)
+
+    if show_steps:
+        ax=add_wmts_layer(target_polygon_buffered, epsg=2056, figsize=(10, 5), geo_target_color='blue', geo_target_linewidth=1)
+        target_polygon.boundary.plot(ax=ax, linewidth=1, color='red')
+        plt.show()
+
+    r_target_polygon_buffered = rasterize(target_polygon_buffered, pixel_size=dem_pixel_size)
+
+    if show_steps:
+        ax=target_polygon_buffered.boundary.plot(color='red', figsize=(10, 5))
+        r_target_polygon_buffered.show_on_map(ax=ax, bar=False)
+        plt.show()
+
+    # Ouverture du DEM sur le glacier
+    if type(dem_src) == str:
+
+        # Suppose that it's a path towards a map of the dem tiles
+        target_polygon_dem = rt.OpenFromMultipleTargets(
+            target_source = dem_src, 
+            area_of_interest = target_polygon_buffered.geometry.iloc[0], 
+            nRes = dem_pixel_size, 
+            load_pixels=True)
+
+    # Already loaded geoim
+    else:
+        target_polygon_dem = rt.Open(dem_src, geoExtent=target_polygon.geometry.iloc[0])
+
+    # Masquage et gestion des nodata
+    target_polygon_dem.fill_negative_values()
+    target_polygon_dem = target_polygon_dem.maskFromVector_v2(target_polygon, 0)
+
+    if show_steps:
+        target_polygon_dem.show_on_map(bar_fraction=0.03, bar_pad=0.1, figsize=(10, 5))
+        plt.show()
+
+    # Identification des altitudes min / max sur le glacier
+    alti_our_min = target_polygon_dem.array[target_polygon_dem.array > 0].min()
+    alti_our_max = target_polygon_dem.array[target_polygon_dem.array > 0].max()
+
+    # Classification
+    test_dem_rc = aida.get_manual_clusters(target_polygon_dem, np.linspace(alti_our_min, alti_our_max, n_classes))
+
+    # Affichage
+    if show_steps:
+        test_dem_rc.show_on_map(bar_fraction=0.03, bar_pad=0.1, figsize=(10, 5))
+        plt.show()
+
+    # Application d'un blurring filter pour lisser les contours 
+    if blurring_radius > 0:
+
+        # Blur sur le raster classifié
+        test_dem_rc_blurred = test_dem_rc.apply_blur(r=blurring_radius)
+
+        # Rasterization du glacier SANS le buffer
+        r_target_polygon_no_buffer = rasterize(target_polygon, pixel_size=dem_pixel_size)
+
+        # Découpge du raster filtré sur le glacier sans buffer, pour être sûr que leur taille matche
+        test_dem_rc_blurred_clipped = rt.geoim.Geoim(rt.cropFromRaster(test_dem_rc_blurred, r_target_polygon_no_buffer))
+
+        # Travail direct sur la matrice : on remplace les valeurs par 0 pour supprimer le edge effect
+        test_dem_rc_blurred_clipped.array[r_target_polygon_no_buffer.array==0]=0
+
+        # Visualisation
+        if show_steps:
+            test_dem_rc_blurred.show_on_map(bar_fraction=0.03, bar_pad=0.1, figsize=(10, 5))
+            test_dem_rc_blurred_clipped.show_on_map(bar_fraction=0.03, bar_pad=0.1,figsize=(10,5))
+            plt.show()
+        # Réassignation du nouveau dem
+        test_dem_rc = test_dem_rc_blurred_clipped
+
+    # Definition of the minimum surface to keep for the polygons
+    n_pixels_min_for_valid_polygons = 10
+    surf_min = dem_pixel_size * dem_pixel_size * n_pixels_min_for_valid_polygons
+
+    # Vectorization
+    target_polygon_dem.updateDs()
+    test_dem_rc_vec = test_dem_rc.vectorize()
+
+    # Separation of the non contiguous units into several features
+    test_dem_rc_vec = test_dem_rc_vec.explode(index_parts=False).reset_index(drop=True)
+
+    # Deletion of the very small parts (noise)
+    test_dem_rc_vec = test_dem_rc_vec[test_dem_rc_vec.area > surf_min]
+
+    # Deletion of the polygon outside of the rock glacier
+    test_dem_rc_vec = test_dem_rc_vec[test_dem_rc_vec.raster_val>0]
+
+    # Lecture des altitudes min, mediane, maximale pour chaque zone
+    def get_alti_min_med_max(zone_row, base_dem):
+
+        zone_gdf = gpd.GeoDataFrame([zone_row]).set_crs(epsg=2056)
+        base_dem = target_polygon_dem.maskFromVector_v2(zone_gdf)
+        base_dem_ar_fl = base_dem.array.flatten()
+        base_dem_ar_fl_valid = base_dem_ar_fl[base_dem_ar_fl > 0]
+        return (base_dem_ar_fl_valid.min(), np.median(base_dem_ar_fl_valid), base_dem_ar_fl_valid.max())
+        
+    test_dem_rc_vec[['elev_min', 'elev_med', 'elev_max']] = test_dem_rc_vec.apply(lambda zone_row: get_alti_min_med_max(zone_row, target_polygon_dem), axis=1, result_type='expand')
+
+    # Ajout de métadonnées
+    if target_polygon_identifier_field is not None:
+        test_dem_rc_vec['target_polygon_id'] = target_polygon.iloc[0][target_polygon_identifier_field]
+    test_dem_rc_vec['zone_class'] = test_dem_rc_vec.raster_val
+    test_dem_rc_vec['zone_pid']  = test_dem_rc_vec.index
+
+    # Save
+    if show_steps:
+        ax=test_dem_rc_vec.plot(cmap='Greens', column='raster_val', figsize=(10, 5))
+        add_wmts_layer(target_polygon, epsg=2056, ax=ax)
+
+        for z in test_dem_rc_vec.iloc:
+            ax.annotate(
+                text = f"{int(z.elev_med)}\n{int(z.zone_class)}",
+                xytext=(z.geometry.centroid.x, z.geometry.centroid.y),
+                xy=(z.geometry.centroid.x, z.geometry.centroid.y)
+            )
+        plt.show()
+
+    return test_dem_rc_vec
