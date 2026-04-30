@@ -1009,3 +1009,10 @@ array type : {self.array.dtype}""")
         valid_min = ar[ar>0].mean()
         ar[ar<0] = valid_min
         self.array=ar
+
+    def get_zonal_stats(self, target_zone, valid_threshold=None, operator='>',  qs=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]):
+        """
+        Return min, first decile, first quantile, median, third quantile, ninth decile, max of the geoim pixels within the target_zone
+        Qs can be arranged to set up the returned values differently
+        """
+        return get_zonal_stats(self, target_zone, valid_threshold, operator, qs)

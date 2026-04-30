@@ -1019,7 +1019,7 @@ def get_neighbors(target_row, potential_neighboors_gdf, neighbooring_buffer=0, p
     neighbors.columns = [c.split('_left')[0] for c in neighbors.columns]
     return neighbors
 
-def get_stats_on_neighboors(target_row, potential_neighboors_gdf, target_field, **kwargs):
+def get_stats_from_neighboors(target_row, potential_neighboors_gdf, target_field, **kwargs):
     """
     return statistical aggregations of target_row.target_field
     min, 0.1, 0.5, 0.9, max, sum, mean
@@ -1030,7 +1030,7 @@ def get_stats_on_neighboors(target_row, potential_neighboors_gdf, target_field, 
 
 def get_moving_window_statistics(target_layer, target_field, **kwargs):
     """
-    apply get_stats_on_neighboors on the whole target_layer based on stats of target_field
+    apply get_stats_from_neighboors on the whole target_layer based on stats of target_field
     kwargs are transmitted to get_neighbors
     """
     output_layer = target_layer.copy()
@@ -1042,7 +1042,7 @@ def get_moving_window_statistics(target_layer, target_field, **kwargs):
         f'{target_field}_av_max',
         f'{target_field}_av_sum',
         f'{target_field}_av_mean']
-        ] = output_layer.progress_apply(lambda target_row: get_stats_on_neighboors(target_row, target_layer, target_field, **kwargs), axis=1, result_type='expand')
+        ] = output_layer.progress_apply(lambda target_row: get_stats_from_neighboors(target_row, target_layer, target_field, **kwargs), axis=1, result_type='expand')
 
     return output_layer
 

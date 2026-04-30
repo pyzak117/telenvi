@@ -1451,6 +1451,31 @@ def clip_many(targets, nRes=None):
 
     return targets
 
+def get_zonal_stats(target_raster, target_zone, valid_threshold=None, operator='>', qs=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]):
+    """
+    Return min, first decile, first quantile, median, third quantile, ninth decile, max of the raster pixels within the target_zone
+    Qs can be arranged to set up the returned values differently
+    """
+
+    # Mask the target raster on the target_zone
+    target_raster = rt.Open(target_raster, load_pixels=True)
+    target_raster_masked = target_raster.maskFromVector_v2(target_zone)
+    target_array_masked_flatten = target_raster_masked.flatten()
+
+    # Ensure we take only the valid pixels
+    if valid_threshold is not None:
+        if operator == '>':
+            target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten > valid_threshold]
+        elif operator == '<':
+            target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten < valid_threshold]            
+
+    # Ensure there is data to resume
+    if len(target_array_masked_flatten) == 0:
+        return [np.nan for q in qs]
+
+    # Compute statistical metric for each q
+    return [np.quantile(target_array_masked_flatten, q) for q in qs]
+
 def binary_geoims_get_part_of_geo_row_with_ones(geo_row, target_geoim, epsg=2056):
     """
     Sum the pixels == 1 in a binary raster located in a geo polygon
