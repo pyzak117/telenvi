@@ -1215,7 +1215,6 @@ def getRastermap(target_dir_path, epsg=4326, extensions=['tif', 'jp2', 'hgt'], p
 
     # Write their filepaths in a geodataframe
     geo_extents = pd.DataFrame([{'filepath':str(path)} for path in targets_paths])
-    print(len(geo_extents))
 
     # Map their extents
     geo_extents['geometry'] = ''
@@ -1451,18 +1450,23 @@ def clip_many(targets, nRes=None):
 
     return targets
 
-def get_zonal_stats(target_raster, target_zone, valid_threshold=None, operator='>', qs=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]):
+def get_zonal_stats_sample(target_raster, target_zone, valid_threshold=None, operator='>', deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], maskValue=0):
     """
     Return min, first decile, first quantile, median, third quantile, ninth decile, max of the raster pixels within the target_zone
     Qs can be arranged to set up the returned values differently
     """
 
-    # Mask the target raster on the target_zone
-    target_raster = rt.Open(target_raster, load_pixels=True)
-    target_raster_masked = target_raster.maskFromVector_v2(target_zone)
-    target_array_masked_flatten = target_raster_masked.flatten()
+    # First we crop the target raster on the target zone
+    target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
+
+    # Now we set to maskValue the pixels outside of the zone
+    target_raster_masked = target_raster_cropped.maskFromVector_v2(target_zone, maskValue=maskValue)
+
+    # Now, we flatten the array to make easier the use of the mask
+    target_array_masked_flatten = target_raster_masked.array.flatten()
 
     # Ensure we take only the valid pixels
+    # Not necessary of target_zone is a square because it's bounding box will match the raster extent
     if valid_threshold is not None:
         if operator == '>':
             target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten > valid_threshold]
@@ -1471,10 +1475,73 @@ def get_zonal_stats(target_raster, target_zone, valid_threshold=None, operator='
 
     # Ensure there is data to resume
     if len(target_array_masked_flatten) == 0:
-        return [np.nan for q in qs]
+        return [np.nan for d in deciles]
 
     # Compute statistical metric for each q
-    return [np.quantile(target_array_masked_flatten, q) for q in qs]
+    return [np.quantile(target_array_masked_flatten, d) for d in deciles]
+
+def get_zonal_sum_sample(target_raster, target_zone, valid_threshold=None, operator='>', maskValue=0):
+    """
+    Return sum of pixels of the target_raster within target_zone
+    """
+    # First we crop the target raster on the target zone
+    target_raster_cropped = Open(cropFromVector(target_raster, target_zone.geometry), load_pixels=True)
+
+    # Now we set to maskValue the pixels outside of the zone
+    target_raster_masked = target_raster_cropped.maskFromVector_v2(target_zone, maskValue=maskValue)
+
+    # Now, we flatten the array to make easier the use of the mask
+    target_array_masked_flatten = target_raster_masked.array.flatten()
+
+    # Ensure we take only the valid pixels
+    # Not necessary of target_zone is a square because it's bounding box will match the raster extent
+    if valid_threshold is not None:
+        if operator == '>':
+            target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten > valid_threshold]
+        elif operator == '<':
+            target_array_masked_flatten = target_array_masked_flatten[target_array_masked_flatten < valid_threshold]            
+
+    # Ensure there is data to resume
+    if len(target_array_masked_flatten) == 0:
+        return np.nan
+
+    # Compute statistical metric for each q
+    return target_array_masked_flatten.sum()
+
+def get_zonal_sum_layer(target_raster, target_layer, valid_threshold=None, operator='>',  fieldname=None, maskValue=0):
+    """
+    Extract pxiel sum on the target raster pixels for each sample of the vector target_layer.
+    Return a new geodataframe with a new field.
+    """
+
+    # Define output field names
+    if fieldname is None:
+        fieldname = "sum_raster"
+
+    # Processing
+    tqdm.pandas()
+    output_layer = target_layer.copy()
+    output_layer[fieldname] = output_layer.progress_apply(lambda row: get_zonal_sum_sample(target_raster, row, valid_threshold, operator, maskValue=maskValue), axis=1)
+    return output_layer
+
+def get_zonal_stats_layer(target_raster, target_layer, valid_threshold=None, operator='>',  deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], fieldnames=None, maskValue=0):
+    """
+    Extract zonal statistics on the target raster pixels for each sample of the vector target_layer.
+    Return a new geodataframe with one field for each q.
+    """
+
+    # Define output field names
+    if fieldnames is None:
+        fieldnames = [f"raster_d{d}" for d in deciles]
+    else:
+        if len(fieldnames) != len(deciles):
+            raise ValueError('Fieldnames length must match deciles len')
+
+    # Processing
+    tqdm.pandas()
+    output_layer = target_layer.copy()
+    output_layer[fieldnames] = output_layer.progress_apply(lambda row: get_zonal_stats_sample(target_raster, row, valid_threshold, operator, deciles, maskValue=maskValue), axis=1, result_type='expand')
+    return output_layer
 
 def binary_geoims_get_part_of_geo_row_with_ones(geo_row, target_geoim, epsg=2056):
     """

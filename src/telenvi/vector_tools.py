@@ -969,81 +969,275 @@ def check_gpkg(gpkg_path: str, layer_name: str) -> bool:
     except sqlite3.Error:
         return False
 
-def get_left_right_quantile(left_gdf, right_gdf, field, q=0.5, out_field_name=None, predicate='intersects', erase_existing_field=False):
+def overlay_quantile(
+    left_gdf, 
+    right_gdf, 
+    target_field, 
+    deciles=[0, 0.1, 0.5, 0.9, 1], 
+    out_field_names=None,
+    predicate='intersects', 
+    ):
     """
-    create a new field in the right_gdf by computing quantile q of left_samples geographically located in right samples
+    Computes multiple quantiles (deciles) of a numeric 'field' from features in 
+    'left_gdf' that spatially intersect with features in 'right_gdf'. 
+    The results are added as new columns to 'right_gdf'.
+
+    Parameters
+    ----------
+    left_gdf : geopandas.GeoDataFrame
+        The source dataset containing the numeric values to analyze.
+    right_gdf : geopandas.GeoDataFrame
+        The target dataset to which the calculated quantile values will be added.
+    target_field : str
+        The name of the numeric column in 'left_gdf' used for the quantile calculation.
+    deciles : list of float, default [0, 0.1, 0.5, 0.9, 1]
+        A list of quantile values between 0 and 1 to compute. 
+        For example, 0.5 computes the median, 0.1 the 10th percentile.
+    out_field_names : list of str, optional
+        Custom names for the new columns in 'right_gdf'. 
+        If None, defaults to '{field}_{quantile}' (e.g., 'income_0.5').
+        Must match the length of 'deciles' if provided.
+    predicate : str, default 'intersects'
+        The spatial predicate used to match features between 'left_gdf' and 'right_gdf'.
+        Common options include 'intersects', 'within', 'contains'.
+    erase_existing_field : bool, default False
+        If True, removes any existing column in 'right_gdf' matching the 
+        output names before writing new values. If False, raises an error 
+        if a column already exists.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        The modified 'right_gdf' with one new column for each quantile in 'deciles'.
     """
     
     # Default creation of output field name based on input field and q
-    if out_field_name is None:
-        out_field_name = f"q{q}_{field}"
-    
-    # Check if the field already exists
-    if out_field_name in right_gdf.columns and not erase_existing_field:
-        return right_gdf
-        
+    if out_field_names is None:
+        out_field_names = [f"{target_field}_d{int(d*10)}" for d in deciles]
+
     # Define function which works for one polygon
     def _row_func(right_row):
         right_row_gdf = gpd.GeoDataFrame([right_row])
         left_samples_in_right_row = spatial_selection(left_gdf, right_row_gdf, predicate=predicate)
-        return left_samples_in_right_row[field].quantile(q)
+        return [left_samples_in_right_row[target_field].quantile(d) for d in deciles]
 
     # Apply it to the whole geodataframe of polygons (right)
     tqdm.pandas()
-    right_gdf[out_field_name] = right_gdf.progress_apply(lambda right_row: _row_func(right_row), axis=1)
+    right_gdf[out_field_names] = right_gdf.progress_apply(lambda right_row: _row_func(right_row), axis=1, result_type='expand')
 
     return right_gdf
 
-def count_points(pts, polygons, field_name='n_pts'):
+def overlay_count(left, right, field_name='n_left'):
     """
-    Count the number of pts samples within each polygons
+    Count the number of left samples which intersect each right samples
     """
-    if field_name in polygons.columns:
-        return polygons
+    if field_name in right.columns:
+        return right
 
     def _row_func(polygon_row):
         pol_gdf = gpd.GeoDataFrame([polygon_row])
-        pts_in_pol = spatial_selection(pts, pol_gdf, predicate='intersects')
-        return len(pts_in_pol)
+        left_in_pol = spatial_selection(left, pol_gdf, predicate='intersects')
+        return len(left_in_pol)
     tqdm.pandas()
-    polygons[field_name] = polygons.progress_apply(lambda pt_row: _row_func(pt_row), axis=1)
-    return polygons
+    right[field_name] = right.progress_apply(lambda pt_row: _row_func(pt_row), axis=1)
+    return right
 
-def get_neighbors(target_row, potential_neighboors_gdf, neighbooring_buffer=0, predicate='intersects', epsg=2056):
+def get_neighbors(target_row, potential_neighboors_gdf, neighbooring_distance=0, predicate='intersects', epsg=2056):
     """
     target_row : gpd.GeoSeries
+    Return the samples of potential_neighboors_gdf which are close from the target_row. 
+    Distance is expressed in CRS units. 
     """
+
+    # Build a geodataframe from the target row
     target_gdf = gpd.GeoDataFrame([target_row]).set_crs(epsg=epsg)
-    target_gdf['geometry'] = target_gdf.apply(lambda row: row.geometry.buffer(neighbooring_buffer), axis=1)
+
+    # Apply a buffer around the target row
+    target_gdf['geometry'] = target_gdf.apply(lambda row: row.geometry.buffer(neighbooring_distance), axis=1)
+
+    # Operate spatial join to find the samples intersecting the buffer
+    # 'c+_left' is there to manage the automatic field name changes applied by geopandas.sjoin
+    # Either, it remove the fields and this is very annoying for stats from neighbors
     neighbors = spatial_selection(potential_neighboors_gdf, target_gdf, predicate=predicate, cols_to_keep=[c + '_left' for c in potential_neighboors_gdf.columns])
     neighbors.columns = [c.split('_left')[0] for c in neighbors.columns]
     return neighbors
 
-def get_stats_from_neighboors(target_row, potential_neighboors_gdf, target_field, **kwargs):
+def moving_window_row(target_row, potential_neighboors_gdf, target_fields, deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], neighbooring_distance=0, predicate='intersects', epsg=2056, get_sum=True, get_mean=True, get_std=True, viz=False):
     """
-    return statistical aggregations of target_row.target_field
-    min, 0.1, 0.5, 0.9, max, sum, mean
-    kwargs are transmitted to get_neighbors
-    """
-    neighbors = get_neighbors(target_row, potential_neighboors_gdf, **kwargs)
-    return neighbors[target_field].min(), neighbors[target_field].quantile(0.1), neighbors[target_field].quantile(0.5), neighbors[target_field].quantile(0.9), neighbors[target_field].max(), neighbors[target_field].sum(), neighbors[target_field].mean()
+    Computes descriptive statistics for a moving window around a single GeoSeries row.
+    
+    This function identifies neighbors within a specified distance or spatial predicate
+    and calculates quantiles (deciles), sum, mean, and standard deviation for the 
+    specified target fields.
+    
+    Parameters
+    ----------
+    target_row : gpd.GeoSeries
+        The geographic feature for which to calculate statistics.
+    potential_neighboors_gdf : gpd.GeoDataFrame
+        The GeoDataFrame containing the pool of potential neighbor features.
+    target_fields : list of str
+        Names of the columns in the GeoDataFrame to process.
+    deciles : list of float, optional
+        List of quantiles to compute (e.g., [0, 0.5, 1] for min, median, max).
+        Default is [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1].
+    neighbooring_distance : float, optional
+        Radius for the buffer operation to identify neighbors. Default is 0.
+    predicate : str, optional
+        Spatial predicate used to identify neighbors (e.g., 'intersects', 'within').
+        Default is 'intersects'.
+    epsg : int, optional
+        Coordinate reference system code used for distance calculations.
+        Default is 2056 (Swiss LV95).
+    get_sum : bool, optional
+        If True, append the sum of values to the results. Default is True.
+    get_mean : bool, optional
+        If True, append the mean of values to the results. Default is True.
+    get_std : bool, optional
+        If True, append the standard deviation of values to the results. Default is True.
 
-def get_moving_window_statistics(target_layer, target_field, **kwargs):
+    Returns
+    -------
+    numpy.ndarray
+        Array containing the calculated statistics in the order of deciles, 
+        followed by sum, mean, and std (if requested).
+
+    Notes
+    -----
+    - The function relies on `vt.get_neighbors` for spatial filtering.
+    - Missing values in the target columns are handled by pandas/numpy standard behavior.
     """
-    apply get_stats_from_neighboors on the whole target_layer based on stats of target_field
-    kwargs are transmitted to get_neighbors
+
+    # Ensure target_fields is list
+    if type(target_fields) == str:
+        target_fields = [target_fields]
+
+    # Scan the neighbors
+    neighbors = vt.get_neighbors(target_row, potential_neighboors_gdf, neighbooring_distance, predicate, epsg)
+    if viz:
+        ax=neighbors.plot(column=target_fields[0])
+        gpd.GeoDataFrame([target_row]).plot(color='red', ax=ax)
+
+    # Container
+    all_field_all_summaries = []
+
+    # Compute the stat metrics for each field within the neighbor population
+    for target_field in target_fields:
+
+        values_to_summarize = neighbors[target_field]
+        field_summary = [values_to_summarize.quantile(d) for d in deciles]
+
+        # Other stat metrics
+        if get_sum:
+            field_summary.extend([values_to_summarize.sum()])
+
+        if get_mean:
+            field_summary.extend([values_to_summarize.mean()])
+
+        if get_std:
+            field_summary.extend([values_to_summarize.std()])
+
+        all_field_all_summaries.append(field_summary)
+
+    return np.array(all_field_all_summaries).flatten()
+
+def moving_window_layer(target_layer, target_fields, neighbooring_distance=0, deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], predicate='intersects', epsg=2056, dest_fieldnames=None,  get_sum=True, get_mean=True, get_std=True):
     """
+        Computes moving window statistics (deciles, sum, mean, std) for all rows in a GeoDataFrame layer.
+        
+        This function applies the `moving_window_row` logic to every feature in the input layer, 
+        identifying neighbors based on a spatial distance or predicate, and calculating requested 
+        statistics for specified target fields.
+        
+        Parameters
+        ----------
+        target_layer : gpd.GeoDataFrame
+            The input GeoDataFrame containing the features to process.
+        target_fields : str or list of str
+            The name(s) of the column(s) in the GeoDataFrame to analyze. 
+            If a string is provided, it is converted to a list.
+        neighbooring_distance : float, optional
+            Radius (in the CRS units) for the buffer operation to identify neighbors.
+            Default is 0, which detect only the direct neighbors.
+        deciles : list of float, optional
+            Quantiles to compute (e.g., [0, 0.5, 1]). Default is [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1].
+        predicate : str, optional
+            Spatial predicate for neighbor identification (e.g., 'intersects', 'within').
+            Default is 'intersects'.
+        epsg : int, optional
+            Coordinate Reference System code used for distance calculations.
+            Default is 2056 (Swiss LV95).
+        dest_fieldnames : list of str, optional
+            Custom names for the output columns. 
+            If None, names are auto-generated based on the metric type, field name, and distance.
+        get_sum : bool, optional
+            If True, compute and save the sum of neighbor values. Default is True.
+        get_mean : bool, optional
+            If True, compute and save the mean of neighbor values. Default is True.
+        get_std : bool, optional
+            If True, compute and save the standard deviation of neighbor values. Default is True.
+
+        Returns
+        -------
+        gpd.GeoDataFrame
+            A copy of the input layer with new columns containing the computed statistics.
+            
+        Raises
+        ------
+        ValueError
+            If `dest_fieldnames` is provided but its length does not match the expected 
+            number of output fields (deciles + optional metrics).
+
+        Notes
+        -----
+        - Uses `tqdm.pandas()` to display a progress bar during the `apply` operation.
+        - The function relies on `moving_window_row` for the core calculation.
+        - Output field naming convention:
+        - Deciles: `mv_dec_{decile}_{field}_{distance}`
+        - Stats: `mv_{stat}_{field}_{distance}` (e.g., `mv_sum_...`)
+        """
     output_layer = target_layer.copy()
-    tqdm.pandas()
-    output_layer[[f'{target_field}_av_min',
-        f'{target_field}_av_tail',
-        f'{target_field}_av_med',
-        f'{target_field}_av_head',
-        f'{target_field}_av_max',
-        f'{target_field}_av_sum',
-        f'{target_field}_av_mean']
-        ] = output_layer.progress_apply(lambda target_row: get_stats_from_neighboors(target_row, target_layer, target_field, **kwargs), axis=1, result_type='expand')
 
+    # Ensure target_fields is list
+    if type(target_fields) == str:
+        target_fields = [target_fields]
+
+    # Automatically create output fieldnames
+    if dest_fieldnames is None:
+
+        # Container
+        dest_fieldnames = []
+
+        # For each field to process
+        for target_field in target_fields:
+            
+            # One field per decile to compute        
+            for d in deciles:
+                dest_fieldnames.append(f'mv_dec_{d}_{target_field}_{neighbooring_distance}')
+    
+            # One field per additional stat metric
+            if get_sum:
+                dest_fieldnames.append(f"mv_sum_{target_field}_{neighbooring_distance}")
+            if get_mean:
+                dest_fieldnames.append(f"mv_mean_{target_field}_{neighbooring_distance}")
+            if get_std:
+                dest_fieldnames.append(f"mv_std_{target_field}_{neighbooring_distance}")
+
+    # Else, check the consistency between the fields to create and the fieldnames to save them
+    else:
+        # Count the number of dest fields to create based on deciles and optionnal metrics
+        n_fields_to_summarize = len(deciles)
+        for n in (get_sum, get_mean, get_std):
+            if n:
+                n_fields_to_summarize += 1 
+
+        # Check if it match with the len of fieldnames provided by user
+        if len(dest_fieldnames) != n_fields_to_summarize:
+            raise ValueError('Fieldnames length must match statistical metrics length')
+
+    # Processing
+    tqdm.pandas()
+    output_layer[dest_fieldnames] = output_layer.progress_apply(lambda target_row: moving_window_row(target_row, target_layer, target_fields, deciles, neighbooring_distance, predicate, epsg, get_sum, get_mean, get_std), axis=1, result_type='expand')
     return output_layer
 
 def get_topo_zones(

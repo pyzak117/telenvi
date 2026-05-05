@@ -318,18 +318,14 @@ array type : {self.array.dtype}""")
         With a much more simple process than the previous version
         Still to harmonize the types of object returned by the method
         """
-
-        if type(gdf) == gpd.GeoSeries:
+        if type(gdf) in [gpd.GeoSeries, pd.Series]:
             gdf = gpd.GeoDataFrame([gdf]).set_crs(epsg=epsg)
 
         pxs = self.getPixelSize()[0]
         r_gdf = vt.rasterize(gdf, pxs)
 
-        # Crop
-        cropped = Geoim(rt.cropFromRaster(self, r_gdf))
-
         # Clip
-        clipped, r_gdf = rt.clip_many((cropped, r_gdf))
+        clipped, r_gdf = rt.clip_many((self, r_gdf))
         if maskValue not in (0,1):
             clipped.array = clipped.array.astype(np.int32)
 
@@ -1010,9 +1006,20 @@ array type : {self.array.dtype}""")
         ar[ar<0] = valid_min
         self.array=ar
 
-    def get_zonal_stats(self, target_zone, valid_threshold=None, operator='>',  qs=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]):
+    def get_zonal_stats_sample(self, target_zone, valid_threshold=None, operator='>',  deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]):
         """
+        target zone is only one vector zone. It can be a cell of a grid. 
+        get_zonal_stats_sample will apply that function on all the cells of the grids.
+
         Return min, first decile, first quantile, median, third quantile, ninth decile, max of the geoim pixels within the target_zone
         Qs can be arranged to set up the returned values differently
         """
-        return get_zonal_stats(self, target_zone, valid_threshold, operator, qs)
+        return rt.get_zonal_stats_sample(self, target_zone, valid_threshold, operator, deciles)
+    
+    def get_zonal_stats_layer(self, target_layer, valid_threshold=None, operator='>',  deciles=[0, 0.1, 0.25, 0.5, 0.75, 0.9, 1], fieldnames=None,  maskValue=0):
+        """
+        Extract zonal statistics on the geoims pixels for each sample of the vector target_layer.
+        Return a new geodataframe with one field for each q.
+        """
+        output_layer = rt.get_zonal_stats_layer(self, target_layer, valid_threshold, operator, deciles, fieldnames, maskValue)
+        return output_layer
