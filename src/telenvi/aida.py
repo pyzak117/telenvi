@@ -1201,3 +1201,55 @@ def add_groups_legend(ax, target_df, column, show_counts=True, legend_fontsize=8
     ax.legend(handles=legend_elements, title='', fontsize=legend_fontsize, loc=legend_loc).set_zorder(100)
 
     return ax
+
+
+def get_ridges(r_dem, l_canny=1, h_canny=2, ock_asp=50, ock_cur=10, ock_ridges=3, cur_thresh=0.2):
+    """
+    Detect ridges lines from dem sing aspect / canny / cuvature 
+    """
+
+    # Classification en 8 classes d'aspect
+    r_asp = rt.getAspect(r_dem)
+    r_cdp = rt.getCardinalArrayFromAspect(r_asp)
+
+    # Canny edge detection pour trouver les zones où l'orientation des pentes change
+    l=2
+    h=l+1
+    r_cdp_im = geo_monoband_to_pil(r_cdp)
+    r_cdp_canny = canny(r_cdp_im, l_canny, h_canny)
+    geo_r_cdp_canny = mono_im_to_geo_mono(r_cdp_canny, r_cdp)
+    geo_r_cdp_canny.array = np.where(geo_r_cdp_canny.array==255, 1, 0).astype('uint8')
+
+    # Ouverture / Fermeture
+    geo_r_cdp_canny_dn = open_and_close(geo_r_cdp_canny, small_objects_min_size=ock_asp, morpho_operator_size=1)
+
+    # Maintenant on doit virer les fonds de vallée qui ressortent sur le canny curvature
+    r_cur =rt.getCurvature(r_dem, 'curvature')
+
+    # Binarisation du raster de courbure pour les zones où elle est positive (cretes)
+    r_cur_bin = r_cur.copy()
+    r_cur_bin.array = np.where(r_cur.array > cur_thresh, 1, 0).astype('uint8')
+
+    # Ouverture / fermeture pour enlever les petits objets
+    r_cur_bin = open_and_close(r_cur_bin, small_objects_min_size=ock_cur, morpho_operator_size=1)
+
+    # Combinaison du canny et de la courbure pour ne garder que les lignes de crêtes
+    ridges = geo_r_cdp_canny_dn.copy()
+    ridges.array = np.where((geo_r_cdp_canny_dn.array==1) & (r_cur_bin.array==1), 1, 0).astype('uint8')
+
+    # Application d'un filtre final
+    ridges = open_and_close(ridges, small_objects_min_size=ock_ridges, morpho_operator_size=1)
+    return ridges
+
+def get_mean_alti_ridges(r_dem, ridges, target_geoserie = None, decile=0.75):
+
+    # Mask ridges and dem
+    if target_geoserie is not None:
+        r_dem = rt.Open(rt.cropFromVector(r_dem, target_geoserie.geometry), load_pixels=True)
+        ridges = rt.Open(rt.cropFromVector(ridges, target_geoserie.geometry), load_pixels=True)
+
+    # Get alti of ridges
+    alti_ridges = r_dem.array[ridges.array==1]
+    if len(alti_ridges) == 0:
+        return np.nan
+    return np.quantile(alti_ridges, decile)
