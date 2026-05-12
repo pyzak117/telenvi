@@ -489,7 +489,10 @@ def get_manual_clusters(input_target, thresholds, values_style='median'):
 
     return bins
 
-def denoise_binary_image(binary_target, small_objects_min_size = 150, morpho_operator_size = 1, value_to_keep='highest'):
+def erosion_dilatation(binary_target, small_objects_min_size = 150, morpho_operator_size = 1, value_to_keep='highest'):
+    """
+    Apply open cv erosion / dilataion procedure on a binary image, to remove small objects of pixels 0 surrounded by pixels 1 (or the opposite if value_to_keep is 'lowest').
+    """
 
     # Extract array from input target
     binary_array, input_is_geoim = get_array(binary_target)
@@ -527,6 +530,26 @@ def denoise_binary_image(binary_target, small_objects_min_size = 150, morpho_ope
         return out_geoim
     
     return filtered_regions
+
+def open_and_close(binary_target, small_objects_min_size, morpho_operator_size):
+    """
+    Apply successively an opening and a closing operation on a binary image
+    Remove 0 surrounded by 1, and then, 1 surrounded by 0
+    """
+    # Supprime les pixels 1 entourés de 0 - les pixels plats entourés de pixels pentus
+    target_closed = erosion_dilatation(binary_target, small_objects_min_size=small_objects_min_size, morpho_operator_size=morpho_operator_size)
+
+    # Supprime les pixels 0 entourés de 1 - les pixels pentus entourés de pixels plats
+    # Pour ça on inverse la matrice
+    target_closed_opened = invert_binary_image(target_closed)
+    target_closed_opened = erosion_dilatation(target_closed_opened, small_objects_min_size=small_objects_min_size, morpho_operator_size=morpho_operator_size)
+    target_closed_opened = invert_binary_image(target_closed_opened)
+    return target_closed_opened
+
+def invert_binary_image(binary_image):
+    inverted = binary_image.copy()
+    inverted.array = inverted.array * -1 + 1
+    return inverted
 
 def moving_window(target, smoothing_kernel_size=5):
     """Apply a k×k uniform smoothing filter to a 2D array"""
@@ -1045,6 +1068,8 @@ def normalize_array(x, A=0, B=1):
 
     x_min = np.min(x)
     x_max = np.max(x)
+
+    # Replace nan by nodata_value
 
     # Edge case where all the values are identical
     # The, division by 0 (x_max - x_min) will raise an error

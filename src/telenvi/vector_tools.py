@@ -1104,7 +1104,7 @@ def moving_window_row(target_row, potential_neighboors_gdf, target_fields, decil
 
     Notes
     -----
-    - The function relies on `vt.get_neighbors` for spatial filtering.
+    - The function relies on `get_neighbors` for spatial filtering.
     - Missing values in the target columns are handled by pandas/numpy standard behavior.
     """
 
@@ -1113,7 +1113,7 @@ def moving_window_row(target_row, potential_neighboors_gdf, target_fields, decil
         target_fields = [target_fields]
 
     # Scan the neighbors
-    neighbors = vt.get_neighbors(target_row, potential_neighboors_gdf, neighbooring_distance, predicate, epsg)
+    neighbors = get_neighbors(target_row, potential_neighboors_gdf, neighbooring_distance, predicate, epsg)
     if viz:
         ax=neighbors.plot(column=target_fields[0])
         gpd.GeoDataFrame([target_row]).plot(color='red', ax=ax)
@@ -1202,6 +1202,8 @@ def moving_window_layer(target_layer, target_fields, neighbooring_distance=0, de
     if type(target_fields) == str:
         target_fields = [target_fields]
 
+    neighbooring_distance = int(neighbooring_distance)
+
     # Automatically create output fieldnames
     if dest_fieldnames is None:
 
@@ -1230,6 +1232,9 @@ def moving_window_layer(target_layer, target_fields, neighbooring_distance=0, de
         for n in (get_sum, get_mean, get_std):
             if n:
                 n_fields_to_summarize += 1 
+        n_fields_to_summarize *= len(target_fields)
+        print(len(target_fields))
+        print(n_fields_to_summarize, len(dest_fieldnames))
 
         # Check if it match with the len of fieldnames provided by user
         if len(dest_fieldnames) != n_fields_to_summarize:
